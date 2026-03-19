@@ -1,0 +1,19 @@
+# Built plugin packages
+*.xpi
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+
+# Backup files created by force_install.py
+*.bak-force-install
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/settings.json
