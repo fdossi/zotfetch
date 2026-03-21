@@ -41,21 +41,21 @@ cd autoPDFdownloader
 python build.py --clean
 ```
 
-This creates `zotfetch-1.1.0.xpi`. Install it via the steps above.
+This creates `zotfetch-1.2.0.xpi`. Install it via the steps above.
 
 ---
 
 ## Usage
 
-Select one or more items in your Zotero library, then right-click to access the **ZotFetch** menu:
+Select one or more items in your Zotero library, then right-click and hover over **ZotFetch ▶** to open the submenu:
 
 | Command | Description |
 |---|---|
-| **ZotFetch Batch Download** | Downloads PDFs for all selected items using all sources (two-pass if Fast Mode is on) |
-| **ZotFetch Ultra Fast** | Single-pass, fastest mode — OA sources + one Sci-Hub mirror. May download fewer PDFs. |
-| **ZotFetch Retry Failed** | Re-attempts only items that failed in the most recent batch |
-| **ZotFetch Retry After Auth** | Opens up to 3 DOI URLs in your browser for manual login/captcha, then retries blocked items |
-| **ZotFetch Preferences** | Shows current configuration values |
+| **Batch Download** | Downloads PDFs for all selected items using all sources (two-pass if Fast Mode is on) |
+| **Ultra Fast** | Single-pass, fastest mode — OA sources + one Sci-Hub mirror. May download fewer PDFs. |
+| **Retry Failed** | Re-attempts only items that failed in the most recent batch |
+| **Retry After Auth** | Opens up to 3 DOI URLs in your browser for manual login/captcha, then retries blocked items |
+| **Preferences** | Shows current configuration values |
 
 ---
 
@@ -75,7 +75,7 @@ In **Fast Mode**, sources 1–3 run in Pass 1. Only unresolved items proceed to 
 
 ## Configuration
 
-View current settings at any time via **ZotFetch Preferences** in the right-click menu.
+View current settings at any time via **ZotFetch ▶ Preferences** in the right-click menu.
 
 To change settings, edit them directly in **`about:config`** (Zotero's advanced config editor, accessible via **Edit → Settings → Advanced → Config Editor**), filtering by `extensions.zotfetch`.
 
@@ -128,7 +128,7 @@ ZotFetch tracks request history per domain:
 
 ## Known Limitations
 
-- **Captcha-blocked sessions**: When a publisher serves a captcha to the plugin's HTTP client, the plugin cannot solve it. Use **ZotFetch Retry After Auth** to open the URL in your browser, solve the captcha manually, then retry.
+- **Captcha-blocked sessions**: When a publisher serves a captcha to the plugin's HTTP client, the plugin cannot solve it. Use **ZotFetch ▶ Retry After Auth** to open the URL in your browser, solve the captcha manually, then retry.
 - **Paywalled publishers without proxy**: Without an institutional proxy configured, ZotFetch can only find freely available (OA) versions of paywalled articles.
 - **Sci-Hub availability**: Sci-Hub mirror availability varies by region and time. If all mirrors fail, configure more mirrors via `fastMirrorLimit` or retry later.
 
@@ -143,6 +143,10 @@ Contributions via pull requests are welcome.
 ---
 
 ## Changelog
+
+### v1.2.0 (2026-03-21)
+- All menu items consolidated under a single **ZotFetch ▶** submenu in the right-click context menu
+- Separators added between download actions, retry actions, and preferences
 
 ### v1.1.0 (2026-03-19)
 - Added institutional proxy support with 4 URL pattern formats
@@ -161,6 +165,4 @@ Contributions via pull requests are welcome.
 ### v1.0.0
 - Initial release: Native OA, Unpaywall, Sci-Hub, CAPES fallback
 - Anti-captcha consecutive counter with 30-minute domain cooldown
-
-Updated `updates.json` with new SHA256 hash after build.
 
