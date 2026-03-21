@@ -1,5 +1,7 @@
 # ZotFetch: Batch PDF Downloader for Zotero
 
+![ZotFetch banner](banner.jpg)
+
 **ZotFetch** is a [Zotero 8](https://www.zotero.org/) plugin that automatically downloads PDFs for multiple library items in a single operation. It tries multiple sources in sequence — starting from free open-access routes — and falls back to institutional proxies and other repositories when needed.
 
 ---
