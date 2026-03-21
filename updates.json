@@ -3,8 +3,8 @@
     "zotfetch@edslab.research": {
       "updates": [
         {
-          "version": "1.1.0",
-          "update_link": "https://github.com/fdossi/zotfetch/releases/download/v1.1.0/zotfetch-1.1.0.xpi",
+          "version": "1.2.0",
+          "update_link": "https://github.com/fdossi/zotfetch/releases/download/v1.2.0/zotfetch-1.2.0.xpi",
           "applications": {
             "zotero": {
               "strict_min_version": "8.0.4",
