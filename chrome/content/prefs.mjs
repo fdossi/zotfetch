@@ -76,6 +76,12 @@ class ZotFetchPrefs {
     return !!url && url.trim().length > 0;
   }
 
+  // Free API key from https://core.ac.uk/services/api (optional, but raises
+  // rate limit from ~10 req/min to 10k/day).
+  static getCoreApiKey() {
+    return Zotero.Prefs.get(PREF_PREFIX + 'coreApiKey', true) || '';
+  }
+
   static set(key, value) {
     Zotero.Prefs.set(PREF_PREFIX + key, value, true);
   }
@@ -84,6 +90,7 @@ class ZotFetchPrefs {
     // Show current preference values
     const prefs = {
       'Email (Unpaywall)': this.getUnpaywallEmail() || '[Not set]',
+      'CORE API Key': this.getCoreApiKey() ? '[Set]' : '[Not set] - optional, https://core.ac.uk/services/api',
       'Institutional Proxy URL': this.getInstitutionalProxyUrl() || '[Not set] - e.g., https://proxy.your-institution.edu/login?url=',
       'Fast Mode': this.isFastModeEnabled() ? 'Enabled' : 'Disabled',
       'Fast Sci-Hub Mirror Limit': this.getFastMirrorLimit(),

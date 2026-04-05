@@ -83,6 +83,8 @@ class ZotFetch {
       unpaywall: 0,
       semanticscholar: 0,
       openalex: 0,
+      core: 0,
+      europepmc: 0,
       institutional: 0,
       scihub: 0,
       capes: 0,
@@ -171,7 +173,7 @@ class ZotFetch {
     }
 
     progress.setText(
-      `${this.getProgressStatus(stats, batch.length, batch.length, true)} Concluído: ${stats.downloaded} baixados (nativo ${stats.native}, Unpaywall ${stats.unpaywall}, S2 ${stats.semanticscholar}, OA ${stats.openalex}, Institucional ${stats.institutional}, Sci-Hub ${stats.scihub}, CAPES ${stats.capes}) | pendentes ${stats.deferred} | DOI recuperado ${stats.doiRecovered} | não encontrado ${stats.notFound} | erros ${stats.failed} | captcha ${stats.captcha}`
+      `${this.getProgressStatus(stats, batch.length, batch.length, true)} Concluído: ${stats.downloaded} baixados (nativo ${stats.native}, Unpaywall ${stats.unpaywall}, S2 ${stats.semanticscholar}, OA ${stats.openalex}, CORE ${stats.core}, EPMC ${stats.europepmc}, Institucional ${stats.institutional}, Sci-Hub ${stats.scihub}, CAPES ${stats.capes}) | pendentes ${stats.deferred} | DOI recuperado ${stats.doiRecovered} | não encontrado ${stats.notFound} | erros ${stats.failed} | captcha ${stats.captcha}`
     );
     progress.setProgress(100);
     progressWindow.startCloseTimer(10000);
@@ -260,6 +262,8 @@ class ZotFetch {
         if (sid === "unpaywall")             stats.unpaywall++;
         else if (sid === "semanticscholar")  stats.semanticscholar++;
         else if (sid === "openalex")         stats.openalex++;
+        else if (sid === "core")             stats.core++;
+        else if (sid === "europepmc")        stats.europepmc++;
         else if (sid.startsWith("institutional-proxy")) stats.institutional++;
         else if (sid === "capes")            stats.capes++;
         else if (sid === "scihub")           stats.scihub++;
@@ -291,6 +295,8 @@ class ZotFetch {
       new UnpaywallSourceResolver(),
       new SemanticScholarSourceResolver(),
       new OpenAlexSourceResolver(),
+      new EuropePmcSourceResolver(),
+      new CoreSourceResolver(),
       new OaRepositorySourceResolver(),
       new DoiLandingSourceResolver(),
       new InstitutionalProxySourceResolver()

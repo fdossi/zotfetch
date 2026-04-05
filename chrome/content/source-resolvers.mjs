@@ -190,6 +190,196 @@ var OpenAlexSourceResolver = class {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CoreSourceResolver
+// Queries the CORE API (core.ac.uk) which indexes 234M+ research outputs from
+// institutional repositories, preprint servers, and OA journals.
+// Works without an API key (10 req/min) or with a free key (10k/day).
+// Register at https://core.ac.uk/services/api
+// ─────────────────────────────────────────────────────────────────────────────
+var CoreSourceResolver = class {
+  constructor() { this.id = "core"; }
+
+  enabled() { return true; }
+
+  async buildCandidates(_item, ids) {
+    if (!ids.doi) return [];
+
+    const domain = "api.core.ac.uk";
+    if (ZotFetch.cooldown.isDomainCoolingDown(domain)) return [];
+    await ZotFetch.cooldown.honorDomainGap(domain, ZotFetchPrefs);
+
+    try {
+      const apiKey = ZotFetchPrefs.getCoreApiKey();
+      const headers = apiKey
+        ? { Authorization: `Bearer ${apiKey}`, Accept: "application/json" }
+        : { Accept: "application/json" };
+
+      // Use the search endpoint with DOI query; limit=3 to get deduped repo copies.
+      const q = encodeURIComponent(`doi:"${ids.doi}"`);
+      const url = `https://api.core.ac.uk/v3/search/works?q=${q}&fields=downloadUrl,fullTextLink,links&limit=3`;
+
+      const resp = await Zotero.HTTP.request("GET", url, {
+        responseType: "json",
+        timeout: 12000,
+        headers
+      });
+
+      const results = resp.response?.results;
+      if (!Array.isArray(results) || !results.length) {
+        ZotFetch.cooldown.markDomainNonCaptcha(domain);
+        return [];
+      }
+
+      const candidates = [];
+      const seen = new Set();
+
+      for (const work of results) {
+        // downloadUrl is the most reliable — direct PDF from institutional repo.
+        if (work.downloadUrl && !seen.has(work.downloadUrl)) {
+          seen.add(work.downloadUrl);
+          candidates.push({
+            sourceId: "core",
+            label: "CORE",
+            url: work.downloadUrl,
+            kind: _looksLikePdf(work.downloadUrl) ? "direct-pdf" : "landing-page",
+            priority: 88
+          });
+        }
+        // links[] may contain additional download URLs (e.g. from mirror repos).
+        if (Array.isArray(work.links)) {
+          for (const link of work.links) {
+            if (!link.url || seen.has(link.url)) continue;
+            seen.add(link.url);
+            candidates.push({
+              sourceId: "core",
+              label: "CORE",
+              url: link.url,
+              kind: link.type === "download" || _looksLikePdf(link.url) ? "direct-pdf" : "landing-page",
+              priority: 87
+            });
+          }
+        }
+        // fullTextLink as last resort (may be HTML reader).
+        if (work.fullTextLink && !seen.has(work.fullTextLink)) {
+          seen.add(work.fullTextLink);
+          candidates.push({
+            sourceId: "core",
+            label: "CORE",
+            url: work.fullTextLink,
+            kind: _looksLikePdf(work.fullTextLink) ? "direct-pdf" : "landing-page",
+            priority: 86
+          });
+        }
+      }
+
+      if (!candidates.length) {
+        ZotFetch.cooldown.markDomainNonCaptcha(domain);
+        return [];
+      }
+
+      ZotFetch.cooldown.markDomainSuccess(domain);
+      return candidates;
+
+    } catch (error) {
+      if (Utils.isCaptchaError(error)) {
+        ZotFetch.cooldown.markDomainCaptcha(domain);
+      } else {
+        ZotFetch.cooldown.markDomainNonCaptcha(domain);
+      }
+      Zotero.logError(error);
+      return [];
+    }
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EuropePmcSourceResolver
+// Queries the Europe PMC REST API which provides open-access full-text links
+// for biomedical literature. Uses PMID (preferred) or DOI.
+// No API key required. Polite-use rate limit: 10 req/sec.
+// ─────────────────────────────────────────────────────────────────────────────
+var EuropePmcSourceResolver = class {
+  constructor() { this.id = "europepmc"; }
+
+  enabled() { return true; }
+
+  async buildCandidates(_item, ids) {
+    // Needs at least a PMID or DOI.
+    if (!ids.pmid && !ids.doi) return [];
+
+    const domain = "www.ebi.ac.uk";
+    if (ZotFetch.cooldown.isDomainCoolingDown(domain)) return [];
+    await ZotFetch.cooldown.honorDomainGap(domain, ZotFetchPrefs);
+
+    try {
+      // PMID lookup is more precise for biomedical papers; DOI as fallback.
+      const query = ids.pmid
+        ? `EXT_ID:${ids.pmid} AND SRC:MED`
+        : `DOI:"${ids.doi}"`;
+      const email = ZotFetchPrefs.getUnpaywallEmail();
+      const url = `https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=${encodeURIComponent(query)}&format=json&resultType=core&pageSize=1&email=${encodeURIComponent(email)}`;
+
+      const resp = await Zotero.HTTP.request("GET", url, {
+        responseType: "json",
+        timeout: 10000,
+        headers: { Accept: "application/json" }
+      });
+
+      const articles = resp.response?.resultList?.result;
+      if (!Array.isArray(articles) || !articles.length) {
+        ZotFetch.cooldown.markDomainNonCaptcha(domain);
+        return [];
+      }
+
+      const article = articles[0];
+      // Only continue if article is open access.
+      if (article.isOpenAccess !== "Y") {
+        ZotFetch.cooldown.markDomainNonCaptcha(domain);
+        return [];
+      }
+
+      const fullTextUrls = article.fullTextUrlList?.fullTextUrl || [];
+      const candidates = [];
+
+      for (const entry of fullTextUrls) {
+        const { url: ftUrl, availabilityCode, documentStyle } = entry;
+        if (!ftUrl) continue;
+        // availabilityCode: OA = open access, F = free (same), S = subscription.
+        const isOpenAccess = availabilityCode === "OA" || availabilityCode === "F";
+        if (!isOpenAccess) continue;
+
+        const isPdf = documentStyle === "pdf" || _looksLikePdf(ftUrl);
+        candidates.push({
+          sourceId: "europepmc",
+          label: "Europe PMC",
+          url: ftUrl,
+          kind: isPdf ? "direct-pdf" : "landing-page",
+          // PDF URLs get higher priority than HTML reader pages.
+          priority: isPdf ? 89 : 87
+        });
+      }
+
+      if (!candidates.length) {
+        ZotFetch.cooldown.markDomainNonCaptcha(domain);
+        return [];
+      }
+
+      ZotFetch.cooldown.markDomainSuccess(domain);
+      return candidates;
+
+    } catch (error) {
+      if (Utils.isCaptchaError(error)) {
+        ZotFetch.cooldown.markDomainCaptcha(domain);
+      } else {
+        ZotFetch.cooldown.markDomainNonCaptcha(domain);
+      }
+      Zotero.logError(error);
+      return [];
+    }
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // OaRepositorySourceResolver
 // Uses the raw item URL when it points to a known safe OA host (e.g. arXiv,
 // PubMed Central, Zenodo). Reads ids.itemUrl — the unmodified Zotero URL field
@@ -401,6 +591,8 @@ this.NativeSourceResolver = NativeSourceResolver;
 this.UnpaywallSourceResolver = UnpaywallSourceResolver;
 this.SemanticScholarSourceResolver = SemanticScholarSourceResolver;
 this.OpenAlexSourceResolver = OpenAlexSourceResolver;
+this.CoreSourceResolver = CoreSourceResolver;
+this.EuropePmcSourceResolver = EuropePmcSourceResolver;
 this.OaRepositorySourceResolver = OaRepositorySourceResolver;
 this.DoiLandingSourceResolver = DoiLandingSourceResolver;
 this.InstitutionalProxySourceResolver = InstitutionalProxySourceResolver;
