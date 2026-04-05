@@ -191,7 +191,9 @@ var OpenAlexSourceResolver = class {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OaRepositorySourceResolver
-// Uses the item URL field when it points to a known safe OA host.
+// Uses the raw item URL when it points to a known safe OA host (e.g. arXiv,
+// PubMed Central, Zenodo). Reads ids.itemUrl — the unmodified Zotero URL field
+// — rather than ids.url (which may have been replaced by a doi.org URL).
 // ─────────────────────────────────────────────────────────────────────────────
 var OaRepositorySourceResolver = class {
   constructor() { this.id = "oa-repository"; }
@@ -199,13 +201,21 @@ var OaRepositorySourceResolver = class {
   enabled() { return true; }
 
   async buildCandidates(_item, ids) {
-    const url = ids.url;
+    // Use the raw item URL, not the DOI-derived canonical URL.
+    const url = ids.itemUrl;
     if (!url || !url.startsWith("http")) return [];
-    // Only use the URL field — not the DOI-derived https://doi.org/ URL.
-    if (url.startsWith("https://doi.org/")) return [];
 
     const domain = Utils.getDomain(url);
-    if (!domain || !ZotFetch.isSafeOAHost(domain)) return [];
+    if (!domain) return [];
+
+    // Belt-and-suspenders: never follow aggregator URLs even if somehow
+    // ids.itemUrl escaped the aggregator filter in identifiers.mjs.
+    if (IdentifierExtractor._isAggregatorHost(domain)) {
+      Zotero.debug(`[OaRepositorySourceResolver] Skipping aggregator URL: ${domain}`);
+      return [];
+    }
+
+    if (!ZotFetch.isSafeOAHost(domain)) return [];
 
     return [{
       sourceId: "oa-repository",

@@ -2,6 +2,50 @@
 // IdentifierExtractor — robustly extracts DOI, PMID, arXiv ID, URL and
 // bibliographic fields from a Zotero item.
 
+// Domains that act as aggregators or reference databases: they link TO papers
+// but never host the PDF directly. When a DOI is available these URLs are
+// silently ignored. When no DOI is available the URL is also discarded so it
+// never reaches a PDFResolver, avoiding 404s and captcha loops.
+const AGGREGATOR_HOSTS = new Set([
+  // General academic search / discovery
+  "consensus.app",
+  "semanticscholar.org",        // search pages (pdfs.semanticscholar.org is fine)
+  "connected-papers.com",
+  "connectedpapers.com",
+  "inciteful.xyz",
+  "elicit.org",
+  "scispace.com",
+  "typeset.io",
+  "lens.org",
+  "base-search.net",
+  "dimensions.ai",
+  "app.dimensions.ai",
+  // Google Scholar
+  "scholar.google.com",
+  "scholar.google.com.br",
+  "scholar.google.co.uk",
+  "scholar.google.co.in",
+  "scholar.google.de",
+  "scholar.google.fr",
+  "scholar.google.es",
+  "scholar.google.com.mx",
+  // Login-gated repositories (cannot download without account)
+  "researchgate.net",
+  "academia.edu",
+  // Library catalogues
+  "worldcat.org",
+  // Subscription databases (no open PDF in URL)
+  "scopus.com",
+  "webofscience.com",
+  "webofknowledge.com",
+  // AI / summarisation wrappers
+  "perplexity.ai",
+  "typeset.io",
+  // Reference management import sources
+  "zotero.org",
+  "endnote.com",
+]);
+
 /**
  * @typedef {Object} ResolvedIdentifiers
  * @property {string|undefined} doi       - Normalised DOI (no prefix).
@@ -62,13 +106,38 @@ var IdentifierExtractor = {
       if (arxiv) ids.arxivId = arxiv;
     }
 
-    // ── Best URL ─────────────────────────────────────────────────────────────
-    // Priority: attachment URLs, item URL field, DOI-derived URL.
+    // ── URL resolution ────────────────────────────────────────────────────────
+    // ids.itemUrl  — the raw URL from the Zotero URL field (used by
+    //                OaRepositorySourceResolver to check safe OA hosts).
+    // ids.url      — the canonical "best URL" for this paper:
+    //                • When a DOI is known   → https://doi.org/{doi}
+    //                • When no DOI + item URL is not an aggregator → item URL
+    //                • Aggregator URLs (consensus.app, scholar.google.com, etc.)
+    //                  are NEVER used as download sources.
     const urlField = String(item.getField("url") || "").trim();
     if (urlField && /^https?:\/\//i.test(urlField)) {
-      ids.url = urlField;
-    } else if (doi) {
+      ids.itemUrl = urlField;
+    }
+
+    if (doi) {
+      // DOI always wins — use canonical doi.org URL regardless of what the
+      // item URL field contains.
       ids.url = `https://doi.org/${doi}`;
+      if (ids.itemUrl) {
+        const itemDomain = Utils.getDomain(ids.itemUrl);
+        if (itemDomain && this._isAggregatorHost(itemDomain)) {
+          Zotero.debug(`[ZotFetch:ids] Aggregator URL ignored (${itemDomain}) — DOI ${doi} will be used`);
+        }
+      }
+    } else if (ids.itemUrl) {
+      const itemDomain = Utils.getDomain(ids.itemUrl);
+      if (this._isAggregatorHost(itemDomain)) {
+        // No DOI and item URL is an aggregator — discard it entirely so the
+        // pipeline does not waste a request on a page that never has a PDF.
+        Zotero.debug(`[ZotFetch:ids] Aggregator URL discarded (${itemDomain}) — no DOI found`);
+      } else {
+        ids.url = ids.itemUrl;
+      }
     }
 
     // ── Bibliographic metadata ────────────────────────────────────────────────
@@ -89,6 +158,15 @@ var IdentifierExtractor = {
   },
 
   // ── Internal helpers ───────────────────────────────────────────────────────
+
+  // Returns true when the given domain is a known aggregator/reference site.
+  _isAggregatorHost(domain) {
+    if (!domain) return false;
+    for (const host of AGGREGATOR_HOSTS) {
+      if (domain === host || domain.endsWith(`.${host}`)) return true;
+    }
+    return false;
+  },
 
   _extractDoiFromString(str) {
     if (!str) return null;
