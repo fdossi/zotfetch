@@ -51,6 +51,7 @@ def create_xpi(with_latest=False, clean=False):
         'chrome/content/utils.mjs',
         'chrome/content/prefs.mjs',
         'chrome/content/cooldown.mjs',
+        'chrome/content/protected-hosts.mjs',
         'chrome/content/identifiers.mjs',
         'chrome/content/source-resolvers.mjs',
         'chrome/content/pdf-resolvers.mjs',

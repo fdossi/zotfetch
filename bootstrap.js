@@ -21,6 +21,7 @@ var ZotFetchPlugin = {
       Services.scriptloader.loadSubScript(rootURI + "chrome/content/utils.mjs");
       Services.scriptloader.loadSubScript(rootURI + "chrome/content/prefs.mjs");
       Services.scriptloader.loadSubScript(rootURI + "chrome/content/cooldown.mjs");
+      Services.scriptloader.loadSubScript(rootURI + "chrome/content/protected-hosts.mjs");
       Services.scriptloader.loadSubScript(rootURI + "chrome/content/identifiers.mjs");
       Services.scriptloader.loadSubScript(rootURI + "chrome/content/source-resolvers.mjs");
       Services.scriptloader.loadSubScript(rootURI + "chrome/content/pdf-resolvers.mjs");

@@ -37,6 +37,16 @@ class ZotFetch {
   static failedItems = new Map(); // Map<itemId, {item, reason, doi}>
   static _lastFetchReason = "nopdf"; // most severe failure reason for current item
 
+  // Session-level negative cache: blocks re-attempting a (doi, publisher-host)
+  // pair after a captcha/auth/blocked event.  Entries expire per policy TTL.
+  static negativeCache = new ProtectedHosts.ProtectedHostNegativeCache();
+
+  // Per-batch attempt counter: tracks (itemKey, publisher-host) attempts so a
+  // single item cannot hammer the same protected publisher from multiple
+  // equivalent candidates (Unpaywall URL, OpenAlex URL, DOI landing, …).
+  // Cleared at the start of every runBatch() call.
+  static _batchAttemptTracker = new ProtectedHosts.ItemHostAttemptTracker();
+
   static async runUltraFastBatch() {
     return this.runBatch({ ultraFast: true });
   }
@@ -72,6 +82,9 @@ class ZotFetch {
 
     const batchSize = ZotFetchPrefs.getBatchSize();
     const batch = isRetry ? candidates : candidates.slice(0, batchSize);
+
+    // Reset per-batch attempt tracker so previous runs don't carry over counts.
+    ZotFetch._batchAttemptTracker.clear();
     const fastMode = !forceMode && (ultraFast || ZotFetchPrefs.isFastModeEnabled());
     const runFallbackPass = !forceMode && fastMode && !ultraFast;
     const requestDelayMs = ultraFast
@@ -208,6 +221,9 @@ class ZotFetch {
       }
     }
 
+    // Stable key for per-item tracking (DOI preferred; fall back to item ID).
+    const itemKey = ids.doi || String(item.id);
+
     // 2. Build source candidates from mode-appropriate resolvers.
     const sourceResolvers = this._buildSourceResolvers(mode);
     const pdfResolvers    = this._buildPdfResolvers();
@@ -228,6 +244,11 @@ class ZotFetch {
 
     Zotero.debug(`[ZotFetch] ${this.getItemLabel(item)}: ${allCandidates.length} candidate(s) [mode=${mode}]`);
 
+    // Per-item set of publisher hosts where a challenge was detected.
+    // When earlyAbortOnChallenge is set for the host, all remaining
+    // candidates targeting that same host are skipped immediately.
+    const _localHostAborts = new Set();
+
     // 3. Try each candidate through the PDF resolver chain.
     for (const candidate of allCandidates) {
       // Native sentinel — delegate to Zotero's OA finder directly.
@@ -241,6 +262,51 @@ class ZotFetch {
         continue;
       }
 
+      // ── Effective publisher host for protected-host checks ──────────────────
+      // DoiLandingSourceResolver tags doi.org candidates with meta.publisherHost
+      // so we can apply protected-host policy even before the redirect happens.
+      const candidateHost = Utils.getDomain(candidate.url);
+      const effectiveHost = candidate.meta?.publisherHost || candidateHost;
+      const hostPolicy    = ProtectedHosts.getHostPolicy(effectiveHost);
+
+      // ── Negative cache check ────────────────────────────────────────────────
+      if (ids.doi && ZotFetch.negativeCache.has(ids.doi, effectiveHost)) {
+        const nc = ZotFetch.negativeCache.get(ids.doi, effectiveHost);
+        Zotero.debug(
+          `[ZotFetch][NegCache] SKIP ${candidate.sourceId} (${effectiveHost}) ` +
+          `reason=${nc?.reason} doi=${ids.doi} item=${item.id}`
+        );
+        continue;
+      }
+
+      // ── Per-item local abort (challenge detected earlier this run) ──────────
+      if (hostPolicy && _localHostAborts.has(effectiveHost)) {
+        Zotero.debug(
+          `[ZotFetch][ProtectedHost] SKIP ${candidate.sourceId} (${effectiveHost}) ` +
+          `— host aborted for item ${item.id}`
+        );
+        continue;
+      }
+
+      // ── Per-batch attempt limit ─────────────────────────────────────────────
+      // Prevents one item from generating many requests to the same publisher
+      // when multiple source resolvers return equivalent landing-page URLs.
+      if (hostPolicy) {
+        const attempts = ZotFetch._batchAttemptTracker.get(itemKey, effectiveHost);
+        if (attempts >= hostPolicy.maxAttemptsPerItem) {
+          Zotero.debug(
+            `[ZotFetch][ProtectedHost] SKIP ${candidate.sourceId} (${effectiveHost}) ` +
+            `— attempt limit ${hostPolicy.maxAttemptsPerItem} reached for item ${item.id}`
+          );
+          continue;
+        }
+        const newCount = ZotFetch._batchAttemptTracker.increment(itemKey, effectiveHost);
+        Zotero.debug(
+          `[ZotFetch][ProtectedHost] Attempt ${newCount}/${hostPolicy.maxAttemptsPerItem}: ` +
+          `${candidate.sourceId} (${effectiveHost}) doi=${ids.doi || "?"} item=${item.id}`
+        );
+      }
+
       const result = await this._resolveCandidate(candidate, pdfResolvers);
       if (!result.ok) {
         const reason = result.failureReason || "nopdf";
@@ -248,7 +314,31 @@ class ZotFetch {
         if ((PRIORITY[reason] || 0) > (PRIORITY[ZotFetch._lastFetchReason] || 0)) {
           ZotFetch._lastFetchReason = reason;
         }
-        Zotero.debug(`[ZotFetch] ✗ ${candidate.sourceId} → ${reason}`);
+
+        // ── Protected-host early abort on challenge ────────────────────────────
+        // When a protected publisher serves a challenge/auth-wall (HTTP 200 or
+        // 4xx), immediately:
+        //  1. Mark the host as exhausted for this item (skips remaining candidates).
+        //  2. Add to session negative cache (blocks cross-batch retries).
+        //  3. Apply a penalty cooldown proportional to the policy TTL.
+        if (hostPolicy && hostPolicy.earlyAbortOnChallenge &&
+            (reason === "captcha" || reason === "cloudflare" ||
+             reason === "blocked" || reason === "auth")) {
+          _localHostAborts.add(effectiveHost);
+          if (ids.doi) {
+            ZotFetch.negativeCache.add(ids.doi, effectiveHost, reason, hostPolicy);
+          }
+          const penaltyMs = (reason === "auth")
+            ? Math.min((hostPolicy.negativeCacheTtlAuthMs || 45 * 60 * 1000) / 3, 15 * 60 * 1000)
+            : Math.min((hostPolicy.negativeCacheTtlMs    ||  6 * 60 * 60 * 1000) / 10, 36 * 60 * 1000);
+          this.cooldown.applyPenaltyCooldown(effectiveHost, penaltyMs);
+          Zotero.debug(
+            `[ZotFetch][ProtectedHost] Early abort: host=${effectiveHost} reason=${reason} ` +
+            `cooldown=${Math.round(penaltyMs / 60000)} min doi=${ids.doi || "?"} item=${item.id}`
+          );
+        }
+
+        Zotero.debug(`[ZotFetch] ✗ ${candidate.sourceId} (${effectiveHost}) → ${reason}`);
         continue;
       }
 

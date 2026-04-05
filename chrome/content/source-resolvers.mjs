@@ -19,6 +19,41 @@ function _looksLikePdf(url) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// DOI prefix → canonical publisher hostname.
+// Used to pre-classify doi.org candidates so the protected-host policy in
+// fetch.mjs can be applied even before the doi.org redirect is followed.
+// Only well-known prefixes that correspond to protected publishers are listed.
+// ─────────────────────────────────────────────────────────────────────────────
+const _DOI_PREFIX_TO_HOST = {
+  "10.1016": "sciencedirect.com",   // Elsevier flagship journals
+  "10.1006": "sciencedirect.com",   // Old Elsevier prefix (Academic Press)
+  "10.1053": "sciencedirect.com",   // Elsevier clinical journals
+  "10.1016": "sciencedirect.com",   // repeated for clarity
+  "10.1002": "onlinelibrary.wiley.com",
+  "10.1111": "onlinelibrary.wiley.com",  // Wiley-Blackwell
+  "10.1007": "link.springer.com",
+  "10.1007": "link.springer.com",
+  "10.1021": "pubs.acs.org",         // ACS Publications
+  "10.1039": "pubs.rsc.org",         // Royal Society of Chemistry
+  "10.1177": "journals.sagepub.com", // SAGE
+  "10.1080": "tandfonline.com"       // Taylor & Francis
+};
+
+/**
+ * Returns the known canonical publisher hostname for a DOI, or null.
+ * Only covers DOI prefixes whose publishers have a protected-host policy.
+ * @param {string} doi  normalised DOI without prefix (e.g. "10.1016/j.cell.2023.01.001")
+ * @returns {string|null}
+ */
+function _publisherHostFromDoi(doi) {
+  if (!doi) return null;
+  for (const [prefix, host] of Object.entries(_DOI_PREFIX_TO_HOST)) {
+    if (doi.startsWith(prefix + "/") || doi === prefix) return host;
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // NativeSourceResolver
 // Delegates to Zotero's own OA finder. Produces a sentinel candidate that
 // tells the pipeline to call ZotFetch.tryNative() rather than going through a
@@ -429,13 +464,20 @@ var DoiLandingSourceResolver = class {
 
   async buildCandidates(_item, ids) {
     if (!ids.doi) return [];
+
+    // Tag the candidate with the known publisher host (derived from DOI prefix)
+    // so fetch.mjs can apply the protected-host policy and attempt limiter
+    // before following the doi.org redirect.
+    const publisherHost = _publisherHostFromDoi(ids.doi);
+
     return [{
       sourceId: "doi-landing",
       label: "DOI Landing",
       url: `https://doi.org/${encodeURIComponent(ids.doi)}`,
       kind: "landing-page",
       priority: 80,
-      headers: { Referer: "https://doi.org/" }
+      headers: { Referer: "https://doi.org/" },
+      meta: publisherHost ? { publisherHost } : undefined
     }];
   }
 };
