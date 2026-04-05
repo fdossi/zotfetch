@@ -51,6 +51,10 @@ def create_xpi(with_latest=False, clean=False):
         'chrome/content/utils.mjs',
         'chrome/content/prefs.mjs',
         'chrome/content/cooldown.mjs',
+        'chrome/content/identifiers.mjs',
+        'chrome/content/source-resolvers.mjs',
+        'chrome/content/pdf-resolvers.mjs',
+        'chrome/content/importer.mjs',
         'chrome/content/fetch.mjs',
         'chrome/content/ui.mjs',
         'locale/en-US/zotfetch.ftl'

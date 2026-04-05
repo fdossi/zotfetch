@@ -1,20 +1,35 @@
 // chrome/content/fetch.mjs
-// PDF fetching: Native, Unpaywall, CAPES, Sci-Hub with anti-captcha controls
+// PDF fetching pipeline — orchestrates SourceResolvers → PDFResolvers → AttachmentImporter.
+//
+// Architecture overview
+// ─────────────────────
+//  processItem()
+//    └─ IdentifierExtractor.fromItem()       — DOI, arXiv, URL, metadata
+//    └─ SourceResolver[].buildCandidates()   — produce SourceCandidates per route
+//    └─ sort by priority
+//    └─ for each candidate:
+//         PDFResolver[].resolve()            — HEAD/GET → real PDF URL
+//           ├─ DirectPDFResolver             — kind=direct-pdf
+//           ├─ PublisherPatternResolver      — landing-page, known hosts
+//           ├─ HtmlLandingPDFResolver        — landing-page, generic extraction
+//           └─ ScihubPDFResolver             — landing-page, Sci-Hub embed
+//         AttachmentImporter.importResolvedPdf()
+//
+// Adding a new source: implement SourceResolver and add it to _buildSourceResolvers().
+// Adding a new PDF extractor: implement PDFResolver and add it to _buildPdfResolvers().
 
 const NATIVE_METHODS = ["oa"];
-const SAFE_UA = [
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Zotero/8.0",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:140.0) Gecko/20100101 Firefox/140.0"
-];
 const SAFE_OA_HOSTS = new Set([
   "arxiv.org", "ar5iv.labs.arxiv.org",
-  "europepmc.org", "ncbi.nlm.nih.gov",
+  "europepmc.org", "ncbi.nlm.nih.gov", "pmc.ncbi.nlm.nih.gov",
   "biorxiv.org", "medrxiv.org", "chemrxiv.org",
   "hal.science", "hal.archives-ouvertes.fr",
   "zenodo.org", "figshare.com",
   "core.ac.uk", "doaj.org", "oapen.org",
   "psyarxiv.com", "osf.io", "ssrn.com",
-  "mdpi.com"
+  "mdpi.com",
+  "semanticscholar.org", "pdfs.semanticscholar.org",
+  "openalex.org"
 ]);
 
 class ZotFetch {
@@ -66,6 +81,8 @@ class ZotFetch {
       downloaded: 0,
       native: 0,
       unpaywall: 0,
+      semanticscholar: 0,
+      openalex: 0,
       institutional: 0,
       scihub: 0,
       capes: 0,
@@ -154,233 +171,300 @@ class ZotFetch {
     }
 
     progress.setText(
-      `${this.getProgressStatus(stats, batch.length, batch.length, true)} Concluído: ${stats.downloaded} baixados (nativo ${stats.native}, Unpaywall ${stats.unpaywall}, Institucional ${stats.institutional}, Sci-Hub ${stats.scihub}, CAPES ${stats.capes}) | pendentes passo 2 ${stats.deferred} | DOI recuperado ${stats.doiRecovered} | não encontrado ${stats.notFound} | erros ${stats.failed} | captcha ${stats.captcha}`
+      `${this.getProgressStatus(stats, batch.length, batch.length, true)} Concluído: ${stats.downloaded} baixados (nativo ${stats.native}, Unpaywall ${stats.unpaywall}, S2 ${stats.semanticscholar}, OA ${stats.openalex}, Institucional ${stats.institutional}, Sci-Hub ${stats.scihub}, CAPES ${stats.capes}) | pendentes ${stats.deferred} | DOI recuperado ${stats.doiRecovered} | não encontrado ${stats.notFound} | erros ${stats.failed} | captcha ${stats.captcha}`
     );
     progress.setProgress(100);
     progressWindow.startCloseTimer(10000);
   }
 
+  // ── Main item processor ─────────────────────────────────────────────────
+
+  /**
+   * Attempt to find and attach a PDF for one Zotero item.
+   *
+   * Modes:
+   *   "fast"     — native + unpaywall + s2 + openalex + oa-repo + doi-landing + proxy;
+   *                no Sci-Hub; defers to fallback pass on failure.
+   *   "ultra"    — fast sources + limited Sci-Hub mirrors; no fallback pass.
+   *   "fallback" — Sci-Hub (full mirror list) + CAPES.
+   *   "full"     — all sources, no deferral.
+   */
   static async processItem(item, stats, mode = "full") {
     ZotFetch.failedItems.delete(String(item.id));
-    if (await this.hasPDF(item)) {
-      return "already";
-    }
+    if (await this.hasPDF(item)) return "already";
     ZotFetch._lastFetchReason = "nopdf";
 
-    let doi = Utils.normalizeDOI(item.getField("DOI"));
-    if (!doi && mode !== "ultra") {
+    // 1. Extract identifiers (DOI, arXiv, URL, metadata).
+    const ids = await IdentifierExtractor.fromItem(item);
+
+    // Attempt CrossRef DOI lookup if not found yet (skipped in ultra mode).
+    if (!ids.doi && mode !== "ultra") {
       const lookedUp = await this.lookupDOI(item);
       if (lookedUp) {
-        doi = lookedUp;
+        ids.doi = lookedUp;
         stats.doiRecovered++;
       }
     }
 
-    if (mode === "fast") {
-      if (await this.tryNative(item)) {
-        stats.downloaded++;
-        stats.native++;
-        return "native";
-      }
+    // 2. Build source candidates from mode-appropriate resolvers.
+    const sourceResolvers = this._buildSourceResolvers(mode);
+    const pdfResolvers    = this._buildPdfResolvers();
 
-      if (await this.tryUnpaywall(item, doi)) {
-        stats.downloaded++;
-        stats.unpaywall++;
-        return "unpaywall";
+    const allCandidates = [];
+    for (const sr of sourceResolvers) {
+      if (!sr.enabled()) continue;
+      try {
+        const partial = await sr.buildCandidates(item, ids);
+        allCandidates.push(...partial);
+      } catch (err) {
+        Zotero.logError(err);
       }
-
-      if (ZotFetchPrefs.isInstitutionalProxyEnabled() && await this.tryInstitutionalProxy(item, doi)) {
-        stats.downloaded++;
-        stats.institutional++;
-        return "institutional";
-      }
-
-      return "deferred";
     }
 
-    if (mode === "ultra") {
-      if (await this.tryNative(item)) {
-        stats.downloaded++;
-        stats.native++;
-        return "native";
+    // Sort descending by priority.
+    allCandidates.sort((a, b) => b.priority - a.priority);
+
+    Zotero.debug(`[ZotFetch] ${this.getItemLabel(item)}: ${allCandidates.length} candidate(s) [mode=${mode}]`);
+
+    // 3. Try each candidate through the PDF resolver chain.
+    for (const candidate of allCandidates) {
+      // Native sentinel — delegate to Zotero's OA finder directly.
+      if (candidate.sourceId === "native") {
+        if (await this.tryNative(item)) {
+          stats.downloaded++;
+          stats.native++;
+          Zotero.debug(`[ZotFetch] ✓ native (item ${item.id})`);
+          return "native";
+        }
+        continue;
       }
 
-      if (await this.tryUnpaywall(item, doi)) {
-        stats.downloaded++;
-        stats.unpaywall++;
-        return "unpaywall";
+      const result = await this._resolveCandidate(candidate, pdfResolvers);
+      if (!result.ok) {
+        const reason = result.failureReason || "nopdf";
+        const PRIORITY = { cloudflare: 6, captcha: 5, auth: 4, blocked: 3, timeout: 2, network: 1, nopdf: 0 };
+        if ((PRIORITY[reason] || 0) > (PRIORITY[ZotFetch._lastFetchReason] || 0)) {
+          ZotFetch._lastFetchReason = reason;
+        }
+        Zotero.debug(`[ZotFetch] ✗ ${candidate.sourceId} → ${reason}`);
+        continue;
       }
 
-      if (ZotFetchPrefs.isInstitutionalProxyEnabled() && await this.tryInstitutionalProxy(item, doi)) {
+      // 4. Import the resolved PDF.
+      const t0 = Date.now();
+      const ok = await AttachmentImporter.importResolvedPdf(item, result, candidate.label);
+      if (ok) {
         stats.downloaded++;
-        stats.institutional++;
-        return "institutional";
+        const sid = candidate.sourceId;
+        Zotero.debug(`[ZotFetch] ✓ ${sid} (${Date.now() - t0}ms, item ${item.id})`);
+        if (sid === "unpaywall")             stats.unpaywall++;
+        else if (sid === "semanticscholar")  stats.semanticscholar++;
+        else if (sid === "openalex")         stats.openalex++;
+        else if (sid.startsWith("institutional-proxy")) stats.institutional++;
+        else if (sid === "capes")            stats.capes++;
+        else if (sid === "scihub")           stats.scihub++;
+        else                                 stats.unpaywall++; // oa-repo / doi-landing → unpaywall bucket
+        return sid;
       }
-
-      if (ZotFetchPrefs.isScihubEnabled() && doi && await this.tryScihub(item, doi, 1)) {
-        stats.downloaded++;
-        stats.scihub++;
-        return "scihub";
-      }
-
-      return "deferred";
     }
 
-    if (mode === "fallback") {
-      if (ZotFetchPrefs.isScihubEnabled() && await this.tryScihub(item, doi, ZotFetchPrefs.getFastMirrorLimit())) {
-        stats.downloaded++;
-        stats.scihub++;
-        return "scihub";
-      }
+    // 5. Nothing worked.
+    if (mode === "fast") return "deferred";
 
-      if (ZotFetchPrefs.isCapesEnabled() && await this.tryCapes(item, doi)) {
-        stats.downloaded++;
-        stats.capes++;
-        return "capes";
-      }
-
-      ZotFetch.failedItems.set(String(item.id), { item, reason: ZotFetch._lastFetchReason, doi: doi || "" });
-      stats.notFound++;
-      return "notfound";
-    }
-
-    if (await this.tryNative(item)) {
-      stats.downloaded++;
-      stats.native++;
-      return "native";
-    }
-
-    if (await this.tryUnpaywall(item, doi)) {
-      stats.downloaded++;
-      stats.unpaywall++;
-      return "unpaywall";
-    }
-
-    if (ZotFetchPrefs.isInstitutionalProxyEnabled() && await this.tryInstitutionalProxy(item, doi)) {
-      stats.downloaded++;
-      stats.institutional++;
-      return "institutional";
-    }
-
-    if (ZotFetchPrefs.isScihubEnabled() && await this.tryScihub(item, doi)) {
-      stats.downloaded++;
-      stats.scihub++;
-      return "scihub";
-    }
-
-    if (ZotFetchPrefs.isCapesEnabled() && await this.tryCapes(item, doi)) {
-      stats.downloaded++;
-      stats.capes++;
-      return "capes";
-    }
-
-    ZotFetch.failedItems.set(String(item.id), { item, reason: ZotFetch._lastFetchReason, doi: doi || "" });
+    ZotFetch.failedItems.set(String(item.id), {
+      item,
+      reason: ZotFetch._lastFetchReason,
+      doi: ids.doi || ""
+    });
     stats.notFound++;
     return "notfound";
   }
 
-  static async tryNative(item) {
-    if (!Zotero.Attachments.canFindFileForItem(item)) {
-      return false;
-    }
+  // ── Pipeline builder helpers ─────────────────────────────────────────────
 
-    await Zotero.Attachments.addAvailableFile(item, {
-      methods: NATIVE_METHODS
-    });
+  /**
+   * Return the ordered list of SourceResolvers for a given mode.
+   */
+  static _buildSourceResolvers(mode) {
+    const fast = [
+      new NativeSourceResolver(),
+      new UnpaywallSourceResolver(),
+      new SemanticScholarSourceResolver(),
+      new OpenAlexSourceResolver(),
+      new OaRepositorySourceResolver(),
+      new DoiLandingSourceResolver(),
+      new InstitutionalProxySourceResolver()
+    ];
+    if (mode === "fast")     return fast;
+    if (mode === "ultra")    return [...fast, new ScihubSourceResolver()];
+    if (mode === "fallback") return [new ScihubSourceResolver(), new CapesSourceResolver()];
+    // "full" — all sources
+    return [...fast, new ScihubSourceResolver(), new CapesSourceResolver()];
+  }
+
+  /** Return the ordered list of PDFResolvers. */
+  static _buildPdfResolvers() {
+    return [
+      new DirectPDFResolver(),
+      new ScihubPDFResolver(),
+      new PublisherPatternResolver(),
+      new HtmlLandingPDFResolver()
+    ];
+  }
+
+  /**
+   * Run a SourceCandidate through matching PDFResolvers until one succeeds.
+   */
+  static async _resolveCandidate(candidate, resolvers) {
+    const ctx = {
+      timeoutMs: ZotFetchPrefs.getRequestTimeoutMs(),
+      cooldown: this.cooldown,
+      prefs: ZotFetchPrefs,
+      userAgents: [Utils.getStealthHeaders()["User-Agent"]],
+      logger: (msg) => Zotero.debug(msg)
+    };
+    for (const resolver of resolvers) {
+      if (!resolver.canResolve(candidate)) continue;
+      try {
+        const result = await resolver.resolve(candidate, ctx);
+        if (result.ok) return result;
+      } catch (err) {
+        Zotero.logError(err);
+      }
+    }
+    return { ok: false, failureReason: "nopdf" };
+  }
+
+  // ── Native Zotero OA resolver ────────────────────────────────────────────
+
+  static async tryNative(item) {
+    if (!Zotero.Attachments.canFindFileForItem(item)) return false;
+    await Zotero.Attachments.addAvailableFile(item, { methods: NATIVE_METHODS });
     return this.hasPDF(item);
   }
 
+  // ── Legacy try* helpers (kept for backward compatibility) ────────────────
+  // These now delegate to the new pipeline via buildCandidates + resolveCandidate.
+
   static async tryUnpaywall(item, doi) {
-    const email = ZotFetchPrefs.getUnpaywallEmail();
-    if (!doi || !email) {
-      return false;
-    }
+    const ids = doi ? { doi } : await IdentifierExtractor.fromItem(item);
+    return this._trySourceResolver(item, new UnpaywallSourceResolver(), ids);
+  }
 
-    const url = `https://api.unpaywall.org/v2/${encodeURIComponent(doi)}?email=${encodeURIComponent(email)}`;
+  static async trySemanticScholar(item, doi) {
+    const ids = doi ? { doi } : await IdentifierExtractor.fromItem(item);
+    return this._trySourceResolver(item, new SemanticScholarSourceResolver(), ids);
+  }
 
-    try {
-      const resp = await Zotero.HTTP.request("GET", url, {
-        responseType: "json",
-        timeout: ZotFetchPrefs.getUnpaywallTimeoutMs()
-      });
-      this.cooldown.markDomainSuccess("api.unpaywall.org");
-      const data = resp.response;
-      const urls = this.getUnpaywallPDFs(data).sort((a, b) => {
-        const safeA = this.isSafeOAHost(Utils.getDomain(a)) ? 1 : 0;
-        const safeB = this.isSafeOAHost(Utils.getDomain(b)) ? 1 : 0;
-        return safeB - safeA;
-      });
-
-      for (const pdfUrl of urls) {
-        if (await this.fetchPDF(item, pdfUrl, "Unpaywall")) {
-          return true;
-        }
-      }
-    } catch (error) {
-      if (Utils.isCaptchaError(error)) {
-        this.cooldown.markDomainCaptcha("api.unpaywall.org");
-      } else {
-        this.cooldown.markDomainNonCaptcha("api.unpaywall.org");
-      }
-      Zotero.logError(error);
-    }
-
-    return false;
+  static async tryOpenAlex(item, doi) {
+    const ids = doi ? { doi } : await IdentifierExtractor.fromItem(item);
+    return this._trySourceResolver(item, new OpenAlexSourceResolver(), ids);
   }
 
   static async tryInstitutionalProxy(item, doi) {
-    if (!doi) {
-      return false;
-    }
-    const proxyUrl = ZotFetchPrefs.getInstitutionalProxyUrl();
-    if (!proxyUrl || !proxyUrl.trim()) {
-      return false;
-    }
-
-    const doiURL = `https://doi.org/${String(doi).trim()}`;
-    const institutionalUrl = this.buildProxyTargetURL(proxyUrl, doiURL);
-
-    Zotero.debug(`[ZotFetch] Trying institutional proxy: ${proxyUrl.substring(0, 50)}...`);
-    return this.fetchPDF(item, institutionalUrl, "Institutional/Proxy");
+    const ids = doi ? { doi } : await IdentifierExtractor.fromItem(item);
+    return this._trySourceResolver(item, new InstitutionalProxySourceResolver(), ids);
   }
 
   static async tryCapes(item, doi) {
-    if (!doi) {
-      return false;
-    }
-    const proxy = ZotFetchPrefs.getProxyUrl();
-    const doiURL = `https://doi.org/${String(doi).trim()}`;
-    const url = proxy ? this.buildProxyTargetURL(proxy, doiURL) : doiURL;
-    return this.fetchPDF(item, url, "CAPES/DOI");
+    const ids = doi ? { doi } : await IdentifierExtractor.fromItem(item);
+    return this._trySourceResolver(item, new CapesSourceResolver(), ids);
   }
 
   static async tryScihub(item, doi, maxMirrors = null) {
-    if (!doi) {
-      return false;
-    }
+    const ids = doi ? { doi } : await IdentifierExtractor.fromItem(item);
+    const resolver = new ScihubSourceResolver();
+    if (!resolver.enabled()) return false;
 
-    // Multiple Sci-Hub mirrors, ordered by reliability
-    const mirrors = [
-      "sci-hub.se",    // Most stable
-      "sci-hub.st",
-      "sci-hub.ru",
-      "sci-hub.it",
-      "sci-hub.hkvisa.net",
-      "sci-hub.41849.com",
-      "sci-hub.p2p.cx"
-    ];
-    let selectedMirrors = mirrors;
-    if (Number.isFinite(maxMirrors) && maxMirrors > 0) {
-      selectedMirrors = mirrors.slice(0, maxMirrors);
-    }
+    let candidates;
+    try { candidates = await resolver.buildCandidates(item, ids); } catch (err) { Zotero.logError(err); return false; }
 
-    for (const mirror of selectedMirrors) {
-      const url = `https://${mirror}/${doi}`;
-      if (await this.fetchPDF(item, url, "Sci-Hub")) {
-        return true;
-      }
+    const selected = Number.isFinite(maxMirrors) && maxMirrors > 0
+      ? candidates.slice(0, maxMirrors)
+      : candidates;
+
+    const pdfResolvers = this._buildPdfResolvers();
+    for (const candidate of selected) {
+      const result = await this._resolveCandidate(candidate, pdfResolvers);
+      if (!result.ok) continue;
+      const ok = await AttachmentImporter.importResolvedPdf(item, result, candidate.label);
+      if (ok) return true;
     }
     return false;
+  }
+
+  /** Try all candidates from one SourceResolver and import the first success. */
+  static async _trySourceResolver(item, sourceResolver, ids) {
+    if (!sourceResolver.enabled()) return false;
+    let candidates;
+    try { candidates = await sourceResolver.buildCandidates(item, ids); } catch (err) { Zotero.logError(err); return false; }
+
+    const pdfResolvers = this._buildPdfResolvers();
+    for (const candidate of candidates) {
+      const result = await this._resolveCandidate(candidate, pdfResolvers);
+      if (!result.ok) continue;
+      const ok = await AttachmentImporter.importResolvedPdf(item, result, candidate.label);
+      if (ok) return true;
+    }
+    return false;
+  }
+
+  // ── Sci-Hub utilities (used by ScihubPDFResolver) ───────────────────────
+
+  static isCloudflareChallengePage(html) {
+    const lower = html.toLowerCase();
+    return lower.includes("cf-challenge") ||
+           lower.includes("cf_chl") ||
+           lower.includes("turnstile") ||
+           lower.includes("jschl_vc") ||
+           lower.includes("checking if the site connection is secure") ||
+           lower.includes("enable javascript and cookies to continue");
+  }
+
+  // Parses a Sci-Hub HTML landing page and extracts the direct hosted PDF URL.
+  // Sci-Hub embeds the PDF in an <embed>, <iframe id="pdf">, or JS redirect.
+  static extractScihubPdfUrl(html, mirrorOrigin) {
+    if (!html) return null;
+
+    // Pattern 1: <embed src="//dacemirror.sci-hub.se/.../file.pdf#...">
+    const embedMatch = html.match(/<embed[^>]+src=["']([^"']+)["']/i);
+    if (embedMatch) {
+      const src = embedMatch[1].split("#")[0].trim();
+      if (src && (src.toLowerCase().includes(".pdf") || src.includes("/pdf"))) {
+        return this.resolveRelativeUrl(src, mirrorOrigin);
+      }
+    }
+
+    // Pattern 2: <iframe id="pdf" src="...">
+    const iframeMatch =
+      html.match(/<iframe[^>]+id=["']pdf["'][^>]*src=["']([^"']+)["']/i) ||
+      html.match(/<iframe[^>]+src=["']([^"']+)["'][^>]*id=["']pdf["']/i);
+    if (iframeMatch) {
+      const src = iframeMatch[1].split("#")[0].trim();
+      if (src && !src.toLowerCase().includes("captcha") && !src.includes("challenge")) {
+        return this.resolveRelativeUrl(src, mirrorOrigin);
+      }
+    }
+
+    // Pattern 3: JS redirect — onclick / location.href
+    const onclickMatch = html.match(/onclick\s*=\s*["'][^"']*location\.href\s*=\s*'([^']+)'[^"']*["']/i);
+    if (onclickMatch) {
+      const src = onclickMatch[1].split("?")[0].trim();
+      if (src.toLowerCase().includes(".pdf")) {
+        return this.resolveRelativeUrl(src, mirrorOrigin);
+      }
+    }
+
+    return null;
+  }
+
+  // Resolves protocol-relative and root-relative URLs to absolute HTTPS.
+  static resolveRelativeUrl(url, origin) {
+    if (!url) return null;
+    if (/^https?:\/\//i.test(url)) return url;
+    if (url.startsWith("//")) return "https:" + url;
+    if (url.startsWith("/")) return origin + url;
+    return null;
   }
 
   static async fetchPDF(item, url, source) {
@@ -393,104 +477,104 @@ class ZotFetch {
       return false;
     }
 
+    // Micro-delay for domains known to run Cloudflare or similar edge challenges.
+    const isProtectedSource = source.includes("Sci-Hub") ||
+                              source.includes("CAPES") ||
+                              source.includes("Institutional");
+    if (isProtectedSource) {
+      await this.cooldown.applyProtectedDelay();
+    }
+
     await this.cooldown.honorDomainGap(domain, ZotFetchPrefs);
 
     try {
+      // Randomised browser fingerprint — rotates on every call.
       const headers = {
-        "User-Agent": SAFE_UA[0],
+        ...Utils.getStealthHeaders(),
         "Accept": "application/pdf,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
         "DNT": "1"
       };
 
       // Different referer for institutional vs public sources
-      if (source.includes("Institutional") || source.includes("CAPES")) {
-        headers["Referer"] = "https://scholar.google.com/";
-      } else if (source.includes("Sci-Hub")) {
-        headers["Referer"] = "https://sci-hub.se/";
-      } else {
-        headers["Referer"] = "https://doi.org/";
-      }
+  // ── Legacy fetchPDF (kept for any edge callers) ───────────────────────────
+  // Wraps the candidate system; treat the URL as a direct-pdf or landing-page
+  // candidate, resolve it, then import.
 
-      await Zotero.Attachments.importFromURL({
-        libraryID: item.libraryID,
-        parentItemID: item.id,
-        title: `${source} PDF`,
-        url,
-        contentType: "application/pdf",
-        headers
-      });
-      const hasPDF = await this.hasPDF(item);
-      if (hasPDF) {
-        this.cooldown.markDomainSuccess(domain);
-      } else {
-        this.cooldown.markDomainNonCaptcha(domain);
+  static async fetchPDF(item, url, source) {
+    if (!url || !/^https?:\/\//i.test(String(url))) return false;
+
+    const domain = Utils.getDomain(url);
+    if (ZotFetchPrefs.isAntiCaptchaMode() && this.cooldown.isDomainCoolingDown(domain)) return false;
+
+    if (source.includes("Institutional") || source.includes("CAPES") || source.includes("Sci-Hub")) {
+      await this.cooldown.applyProtectedDelay();
+    }
+    await this.cooldown.honorDomainGap(domain, ZotFetchPrefs);
+
+    const isLikelyPdf = /\.pdf(\?|#|$)/i.test(url);
+    const candidate = {
+      sourceId: source.toLowerCase().replace(/\s+/g, "-"),
+      label: source,
+      url,
+      kind: isLikelyPdf ? "direct-pdf" : "landing-page",
+      priority: 50,
+      headers: {
+        ...Utils.getStealthHeaders(),
+        Accept: isLikelyPdf ? "application/pdf,*/*;q=0.8" : "text/html,application/xhtml+xml,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        DNT: "1",
+        Referer: source.includes("Institutional") || source.includes("CAPES")
+          ? "https://scholar.google.com/"
+          : source.includes("Sci-Hub") ? "https://sci-hub.se/" : "https://doi.org/"
       }
-      return hasPDF;
-    } catch (error) {
-      const reason = this.classifyError(error);
-      const REASON_PRIORITY = { captcha: 5, auth: 4, blocked: 3, timeout: 2, network: 1, nopdf: 0 };
-      if ((REASON_PRIORITY[reason] || 0) > (REASON_PRIORITY[ZotFetch._lastFetchReason] || 0)) {
+    };
+
+    const result = await this._resolveCandidate(candidate, this._buildPdfResolvers());
+    if (!result.ok) {
+      const reason = result.failureReason || "nopdf";
+      const PRIORITY = { cloudflare: 6, captcha: 5, auth: 4, blocked: 3, timeout: 2, network: 1, nopdf: 0 };
+      if ((PRIORITY[reason] || 0) > (PRIORITY[ZotFetch._lastFetchReason] || 0)) {
         ZotFetch._lastFetchReason = reason;
       }
-      if (reason === "captcha") {
-        this.cooldown.markDomainCaptcha(domain);
-      } else {
-        this.cooldown.markDomainNonCaptcha(domain);
-      }
-      Zotero.logError(error);
       return false;
     }
+    return AttachmentImporter.importResolvedPdf(item, result, source);
   }
+
+  // ── Proxy URL builder ─────────────────────────────────────────────────────
 
   static buildProxyTargetURL(proxyBase, targetURL) {
     const base = String(proxyBase || "").trim();
     const target = String(targetURL || "").trim();
-    if (!base || !target) {
-      return target;
-    }
-
-    if (base.includes("{url}")) {
-      return base.replace("{url}", encodeURIComponent(target));
-    }
-
-    if (/([?&]url=)$/i.test(base)) {
-      return `${base}${encodeURIComponent(target)}`;
-    }
-
+    if (!base || !target) return target;
+    if (base.includes("{url}")) return base.replace("{url}", encodeURIComponent(target));
+    if (/([?&]url=)$/i.test(base)) return `${base}${encodeURIComponent(target)}`;
     if (base.includes("?")) {
       const sep = base.endsWith("?") || base.endsWith("&") ? "" : "&";
       return `${base}${sep}url=${encodeURIComponent(target)}`;
     }
-
     const sep = base.endsWith("/") ? "" : "/";
     return `${base}${sep}login?url=${encodeURIComponent(target)}`;
   }
 
+  // ── DOI lookup via CrossRef ───────────────────────────────────────────────
+
   static async lookupDOI(item) {
     const title = String(item.getField("title") || "").trim();
-    if (!title) {
-      return "";
-    }
+    if (!title) return "";
 
     const creators = item.getCreators ? item.getCreators() : [];
     const firstAuthor = creators.length > 0
-      ? (creators[0].lastName || creators[0].name || "").trim()
-      : "";
+      ? (creators[0].lastName || creators[0].name || "").trim() : "";
     const year = String(item.getField("year") || "").trim();
     const email = ZotFetchPrefs.getUnpaywallEmail();
-    if (!email) {
-      return "";
-    }
+    if (!email) return "";
 
     try {
       let queryURL = `https://api.crossref.org/works?query.title=${encodeURIComponent(title)}`;
-      if (firstAuthor) {
-        queryURL += `&query.author=${encodeURIComponent(firstAuthor)}`;
-      }
-      if (year) {
-        queryURL += `&filter=from-pub-date:${year},until-pub-date:${year}`;
-      }
+      if (firstAuthor) queryURL += `&query.author=${encodeURIComponent(firstAuthor)}`;
+      if (year) queryURL += `&filter=from-pub-date:${year},until-pub-date:${year}`;
       queryURL += `&rows=3&select=DOI,title,published&mailto=${encodeURIComponent(email)}`;
 
       const response = await Zotero.HTTP.request("GET", queryURL, {
@@ -499,29 +583,20 @@ class ZotFetch {
       });
 
       const results = response.response?.message?.items;
-      if (!Array.isArray(results) || !results.length) {
-        return "";
-      }
+      if (!Array.isArray(results) || !results.length) return "";
 
-      for (const candidate of results) {
-        const candidateDOI = String(candidate.DOI || "").trim();
-        if (!candidateDOI) {
-          continue;
-        }
-        const candidateYear = String(candidate.published?.["date-parts"]?.[0]?.[0] || "");
-        if (year && candidateYear && candidateYear !== year) {
-          continue;
-        }
+      for (const cand of results) {
+        const candidateDOI = String(cand.DOI || "").trim();
+        if (!candidateDOI) continue;
+        const candidateYear = String(cand.published?.["date-parts"]?.[0]?.[0] || "");
+        if (year && candidateYear && candidateYear !== year) continue;
 
-        const candidateTitles = Array.isArray(candidate.title) ? candidate.title : [];
+        const candidateTitles = Array.isArray(cand.title) ? cand.title : [];
         let best = { match: false, score: 0 };
-        for (const candidateTitle of candidateTitles) {
-          const sim = Utils.isTitleSimilar(candidateTitle, title);
-          if (sim.score > best.score) {
-            best = sim;
-          }
+        for (const ct of candidateTitles) {
+          const sim = Utils.isTitleSimilar(ct, title);
+          if (sim.score > best.score) best = sim;
         }
-
         if (best.match) {
           item.setField("DOI", candidateDOI);
           await item.saveTx();
@@ -531,24 +606,18 @@ class ZotFetch {
     } catch (error) {
       Zotero.logError(error);
     }
-
     return "";
   }
 
+  // ── PDF / OA helpers ──────────────────────────────────────────────────────
+
   static async hasPDF(item) {
     const attachmentIDs = item.getAttachments ? item.getAttachments() : [];
-    if (!attachmentIDs || !attachmentIDs.length) {
-      return false;
-    }
-
+    if (!attachmentIDs?.length) return false;
     const atts = await Zotero.Items.getAsync(attachmentIDs);
-    return atts.some((att) => {
-      if (!att) {
-        return false;
-      }
-      if (att.isPDFAttachment?.()) {
-        return true;
-      }
+    return atts.some(att => {
+      if (!att) return false;
+      if (att.isPDFAttachment?.()) return true;
       return att.attachmentContentType === "application/pdf";
     });
   }
@@ -556,22 +625,20 @@ class ZotFetch {
   static getUnpaywallPDFs(data) {
     const list = [
       data?.best_oa_location?.url_for_pdf,
-      ...(Array.isArray(data?.oa_locations) ? data.oa_locations.map((loc) => loc?.url_for_pdf) : [])
+      ...(Array.isArray(data?.oa_locations) ? data.oa_locations.map(loc => loc?.url_for_pdf) : [])
     ];
     return list.filter(Boolean);
   }
 
   static isSafeOAHost(domain) {
-    if (!domain) {
-      return false;
-    }
+    if (!domain) return false;
     for (const host of SAFE_OA_HOSTS) {
-      if (domain === host || domain.endsWith(`.${host}`)) {
-        return true;
-      }
+      if (domain === host || domain.endsWith(`.${host}`)) return true;
     }
     return false;
   }
+
+  // ── UI helpers ────────────────────────────────────────────────────────────
 
   static getItemLabel(item) {
     const title = String(item.getField("title") || "Sem título").trim();
@@ -583,19 +650,13 @@ class ZotFetch {
     const t = Math.max(1, parseInt(total, 10) || 1);
     const p = Math.max(0, parseInt(processed, 10) || 0);
 
-    if (!isFinal && p < 3) {
-      return "🔵";
-    }
+    if (!isFinal && p < 3) return "🔵";
 
     if (isFinal) {
       const finalRate = stats.downloaded / t;
       const highFailure = stats.failed >= Math.max(2, Math.ceil(t * 0.25));
-      if (highFailure || stats.captcha >= 4 || finalRate < 0.45) {
-        return "🔴";
-      }
-      if (stats.failed > 0 || stats.captcha > 0 || finalRate < 0.8) {
-        return "🟡";
-      }
+      if (highFailure || stats.captcha >= 4 || finalRate < 0.45) return "🔴";
+      if (stats.failed > 0 || stats.captcha > 0 || finalRate < 0.8) return "🟡";
       return "🟢";
     }
 
@@ -603,18 +664,16 @@ class ZotFetch {
     const runningRate = stats.downloaded / effectiveProcessed;
     const runningFailureRate = stats.failed / effectiveProcessed;
 
-    if (effectiveProcessed >= 5 && (runningFailureRate >= 0.35 || stats.captcha >= 3 || runningRate < 0.3)) {
-      return "🔴";
-    }
-    if (effectiveProcessed >= 3 && (stats.failed > 0 || stats.captcha > 0 || runningRate < 0.65)) {
-      return "🟡";
-    }
+    if (effectiveProcessed >= 5 && (runningFailureRate >= 0.35 || stats.captcha >= 3 || runningRate < 0.3)) return "🔴";
+    if (effectiveProcessed >= 3 && (stats.failed > 0 || stats.captcha > 0 || runningRate < 0.65)) return "🟡";
     return "🟢";
   }
 
   static classifyError(error) {
     const msg = String(error?.message || error || "").toLowerCase();
     const status = error?.status || error?.xmlhttp?.status || 0;
+    if (status === 403 && (msg.includes("cf-challenge") || msg.includes("cf_chl") ||
+        msg.includes("turnstile") || msg.includes("ray id"))) return "cloudflare";
     if (Utils.isCaptchaError(error)) return "captcha";
     if (status === 401 || status === 403 || msg.includes("403") || msg.includes("forbidden") || msg.includes("unauthorized")) return "auth";
     if (status === 429 || msg.includes("429") || msg.includes("too many") || msg.includes("rate limit") || msg.includes("blocked")) return "blocked";
@@ -623,6 +682,8 @@ class ZotFetch {
     return "network";
   }
 
+  // ── Retry flows ───────────────────────────────────────────────────────────
+
   static async runRetryFailed() {
     if (!ZotFetch.failedItems.size) {
       Zotero.alert(null, "ZotFetch", "Nenhum item falho registrado.\nExecute o Batch Download primeiro.");
@@ -630,9 +691,7 @@ class ZotFetch {
     }
     const pending = [];
     for (const info of ZotFetch.failedItems.values()) {
-      if (!await this.hasPDF(info.item)) {
-        pending.push(info.item);
-      }
+      if (!await this.hasPDF(info.item)) pending.push(info.item);
     }
     if (!pending.length) {
       Zotero.alert(null, "ZotFetch", "Todos os itens falhos já têm PDF.");

@@ -4,22 +4,24 @@
 
 [![DOI](https://zenodo.org/badge/1186582529.svg)](https://doi.org/10.5281/zenodo.19149482)
 
-**ZotFetch** is a [Zotero 8](https://www.zotero.org/) plugin that automatically downloads PDFs for multiple library items in a single operation. It tries multiple sources in sequence — starting from free open-access routes — and falls back to institutional proxies and other repositories when needed.
+**ZotFetch** is a [Zotero 8](https://www.zotero.org/) plugin that automatically downloads PDFs for multiple library items in a single operation. It uses a modular two-stage pipeline — **source resolution** then **PDF extraction** — so that landing pages from publishers, proxies, and repositories are correctly resolved to their actual PDF URL before import.
 
 ---
 
 ## Features
 
-- **Multi-source download pipeline**: Native OA → Unpaywall → Institutional Proxy → Sci-Hub → CAPES/DOI proxy
-- **Fast Mode**: Two-pass strategy — lightweight sources first, heavy fallbacks only for unresolved items
-- **Ultra Fast Mode**: Single-pass, maximum speed, OA-only with one Sci-Hub fallback
+- **Two-stage pipeline**: SourceResolver → PDFResolver → AttachmentImporter. Landing pages are never accidentally imported as PDFs.
+- **Multi-source download**: Native OA → Unpaywall → Semantic Scholar → OpenAlex → OA Repository → DOI Landing → Institutional Proxy → CAPES
+- **HTML-to-PDF extraction**: Publisher landing pages (Springer, Nature, Wiley, Taylor & Francis, ACS, IEEE, MDPI, Frontiers, Elsevier/ScienceDirect, SciELO.br) are parsed with a DOM resolver or a generic HTML extractor (citation_pdf_url meta, `<link rel="alternate">`, `<iframe>`, `<embed>`, and PDF anchors)
+- **Fast Mode**: Two-pass strategy — lightweight open-access sources first, institutional fallbacks only for unresolved items
+- **Ultra Fast Mode**: Single-pass, maximum speed, prioritises open-access sources
 - **Adaptive rate limiting**: Per-domain request spacing with exponential backoff on failures
-- **Anti-captcha protection**: Tracks consecutive captcha hits per domain; blocks domain after 3 consecutive hits, resets on success
+- **Anti-captcha protection**: Tracks consecutive captcha hits per domain; blocks domain after 3 hits, resets on success
 - **DOI lookup**: Automatically resolves missing DOIs via CrossRef before attempting downloads
-- **Retry Failed Items**: Re-runs only the items that failed in the last batch
-- **Retry After Auth**: Opens DOI URLs in your browser for manual authentication, then retries captcha/auth-blocked items
-- **Live progress**: Color-coded status (🔵 warmup / 🟢 good / 🟡 moderate / 🔴 poor) with `PDFs X/Y (Z%)` counter
-- **Institutional proxy support**: Configurable proxy URL for legal access to paywalled content
+- **Retry Failed Items / Retry After Auth**: Targeted retry flows for failed or auth-blocked items
+- **Live progress**: Color-coded status (🔵/🟢/🟡/🔴) with `PDFs X/Y (Z%)` counter
+- **Institutional proxy**: Configurable EZproxy/Shibboleth URL for legal paywalled access; Semantic Scholar links are also routed through the proxy when applicable
+- **Extensible**: New SourceResolvers and PDFResolvers can be added without touching the orchestration code
 
 ---
 
@@ -54,7 +56,7 @@ Select one or more items in your Zotero library, then right-click and hover over
 | Command | Description |
 |---|---|
 | **Batch Download** | Downloads PDFs for all selected items using all sources (two-pass if Fast Mode is on) |
-| **Ultra Fast** | Single-pass, fastest mode — OA sources + one Sci-Hub mirror. May download fewer PDFs. |
+| **Ultra Fast** | Single-pass, fastest mode — open-access sources only. May download fewer PDFs than Batch Download. |
 | **Retry Failed** | Re-attempts only items that failed in the most recent batch |
 | **Retry After Auth** | Opens up to 3 DOI URLs in your browser for manual login/captcha, then retries blocked items |
 | **Preferences** | Shows current configuration values |
@@ -63,15 +65,30 @@ Select one or more items in your Zotero library, then right-click and hover over
 
 ## Download Sources
 
-ZotFetch tries sources in this order for each item:
+ZotFetch tries sources in this order of priority:
 
-1. **Native OA** — Zotero's built-in open-access finder (`addAvailableFile`)
-2. **Unpaywall** — Free legal OA PDF lookup via [Unpaywall API](https://unpaywall.org/) (requires a registered email)
-3. **Institutional Proxy** — Your institution's EZproxy or similar (configurable URL)
-4. **Sci-Hub** — 7 mirrors tried in reliability order; mirror count is limited by `fastMirrorLimit` in fallback pass
-5. **CAPES/DOI proxy** — Brazilian CAPES portal or a custom DOI proxy URL
+| Priority | Source | Notes |
+|---|---|---|
+| 110 | **Native OA** | Zotero's built-in open-access finder |
+| 100 | **Unpaywall** | Free legal OA PDF lookup (requires email) |
+| 95 | **Semantic Scholar** | Graph API open-access PDF field |
+| 90 | **OpenAlex** | best_oa_location PDF URL |
+| 85 | **OA Repository** | Item URL when host is in the safe OA list |
+| 80 | **DOI Landing** | Publisher page via doi.org (HTML→PDF extraction) |
+| 75 | **Institutional Proxy** | DOI routed through your proxy; also routes S2 PDF links |
+| 70 | **CAPES** | Brazilian CAPES portal or custom DOI proxy URL |
 
-In **Fast Mode**, sources 1–3 run in Pass 1. Only unresolved items proceed to Pass 2 (sources 4–5). In **Ultra Fast Mode**, only sources 1–3 plus one Sci-Hub mirror are used in a single pass.
+In **Fast Mode**, sources 110–75 run in Pass 1; unresolved items proceed to Pass 2 (CAPES and institutional fallbacks). In **Ultra Fast Mode**, all sources run in a single pass.
+
+> **Note:** Additional fallback sources can be enabled in `about:config`. See the Configuration section for available options.
+
+### HTML-to-PDF extraction (landing pages)
+
+When a source returns a landing page URL (not a direct PDF), ZotFetch tries to find the real PDF link in this order:
+
+1. **Publisher-specific rule** (Springer, Nature, Wiley, Taylor & Francis, ACS, IEEE, MDPI, Frontiers, Elsevier/ScienceDirect, SciELO.br)
+2. **Generic HTML extractor**: `<meta name="citation_pdf_url">`, `<link rel="alternate" type="application/pdf">`, `<iframe>` / `<embed>` / `<object>` with PDF src, `<a>` links to `.pdf` or with "Download PDF" text
+3. **Direct validation**: HEAD request to confirm Content-Type: application/pdf before importing
 
 ---
 
@@ -83,15 +100,14 @@ To change settings, edit them directly in **`about:config`** (Zotero's advanced 
 
 | Preference key | Default | Description |
 |---|---|---|
-| `extensions.zotfetch.unpaywallEmail` | _(empty)_ | Your email for Unpaywall API access. **Required** for Unpaywall to work. |
+| `extensions.zotfetch.unpaywallEmail` | _(empty)_ | Your email for Unpaywall/OpenAlex/CrossRef API access. **Required** for most sources. |
 | `extensions.zotfetch.institutionalProxyUrl` | _(empty)_ | Your institution's proxy URL, e.g. `https://proxy.myuniversity.edu/login?url=` |
 | `extensions.zotfetch.fastMode` | `true` | Enables two-pass Fast Mode |
-| `extensions.zotfetch.fastMirrorLimit` | `2` | Max Sci-Hub mirrors to try in the fallback pass |
 | `extensions.zotfetch.batchSize` | `30` | Max items to process per batch run |
-| `extensions.zotfetch.requestDelayMs` | `900` | Base delay between requests (ms), ±30% jitter applied |
+| `extensions.zotfetch.requestDelayMs` | `900` | Base delay between requests (ms), ±60% jitter applied |
 | `extensions.zotfetch.domainGapMs` | `1500` | Minimum gap between requests to the same domain (ms) |
+| `extensions.zotfetch.requestTimeoutMs` | `15000` | Per-request HTTP timeout (ms) |
 | `extensions.zotfetch.antiCaptchaMode` | `true` | Skip domains that are currently in cooldown |
-| `extensions.zotfetch.enableScihubFallback` | `true` | Enable Sci-Hub as a fallback source |
 | `extensions.zotfetch.enableCapesFallback` | `true` | Enable CAPES/DOI proxy as a fallback source |
 | `extensions.zotfetch.proxyUrl` | _(empty)_ | CAPES or generic DOI proxy URL |
 | `extensions.zotfetch.unpaywallTimeoutMs` | `12000` | Timeout for Unpaywall API requests (ms) |
@@ -110,14 +126,47 @@ ZotFetch supports all common proxy URL patterns:
 
 ---
 
+## Architecture
+
+```
+processItem()
+├─ IdentifierExtractor.fromItem()          (identifiers.mjs)
+│    extracts DOI, arXiv ID, PMID, URL, title, year, firstAuthor
+├─ SourceResolver[].buildCandidates()      (source-resolvers.mjs)
+│    returns SourceCandidate[] sorted by priority
+└─ for each candidate:
+     PDFResolver[].resolve()               (pdf-resolvers.mjs)
+     ├─ DirectPDFResolver                  HEAD/GET, confirm Content-Type: application/pdf
+     ├─ PublisherPatternResolver           publisher-specific DOM rules
+     └─ HtmlLandingPDFResolver             generic meta/link/iframe/anchor extraction
+     AttachmentImporter.importResolvedPdf() (importer.mjs)
+```
+
+### Adding a new source
+
+1. Create a class in `source-resolvers.mjs` that implements:
+   - `id` — unique string identifier
+   - `enabled()` — returns `boolean`
+   - `buildCandidates(item, ids)` — returns `Promise<SourceCandidate[]>`
+2. Add it to `_buildSourceResolvers()` in `fetch.mjs` at the appropriate priority position.
+
+### Adding a new PDF extractor
+
+1. Create a class in `pdf-resolvers.mjs` that implements:
+   - `canResolve(candidate)` — returns `boolean`
+   - `resolve(candidate, ctx)` — returns `Promise<PDFResolutionResult>`
+2. Add it to `_buildPdfResolvers()` in `fetch.mjs`.
+
+---
+
 ## How Anti-Captcha and Rate Limiting Work
 
 ZotFetch tracks request history per domain:
 
 - **Domain gap**: Waits at least `domainGapMs` milliseconds between requests to the same domain
-- **Adaptive backoff**: On consecutive non-captcha failures, adds exponential extra wait per domain (first +1 s, then +2 s, +4 s… capped at +15 s). Resets on any success.
+- **Adaptive backoff**: Exponential extra wait on consecutive non-captcha failures (+1 s, +2 s, +4 s… capped at +15 s). Resets on any success.
 - **Captcha threshold**: After 3 consecutive captcha responses from the same domain, that domain is blocked for 30 minutes
-- **Failure classification**: Errors are classified as `captcha`, `auth` (403/401), `blocked` (429/rate-limit), `timeout`, `nopdf` (404), or `network`. Each class triggers different cooldown behavior.
+- **Failure classification**: `cloudflare` → `captcha` → `auth` → `blocked` → `timeout` → `nopdf` → `network`
 
 ---
 
@@ -130,9 +179,9 @@ ZotFetch tracks request history per domain:
 
 ## Known Limitations
 
-- **Captcha-blocked sessions**: When a publisher serves a captcha to the plugin's HTTP client, the plugin cannot solve it. Use **ZotFetch ▶ Retry After Auth** to open the URL in your browser, solve the captcha manually, then retry.
-- **Paywalled publishers without proxy**: Without an institutional proxy configured, ZotFetch can only find freely available (OA) versions of paywalled articles.
-- **Sci-Hub availability**: Sci-Hub mirror availability varies by region and time. If all mirrors fail, configure more mirrors via `fastMirrorLimit` or retry later.
+- **Captcha-blocked sessions**: When a publisher serves a captcha, use **ZotFetch ▶ Retry After Auth** to open the URL in your browser, solve the captcha, then retry.
+- **JavaScript-rendered publisher pages**: Some publishers (e.g. ScienceDirect app) require JS to load the PDF link. The plugin uses a JS extraction heuristic from inline script blocks as a best effort, but may miss some.
+- **Paywalled content without proxy**: Without an institutional proxy configured, ZotFetch can only retrieve freely available (OA) versions of paywalled articles.
 
 ---
 
@@ -146,8 +195,20 @@ Contributions via pull requests are welcome.
 
 ## Changelog
 
+### v1.3.0 (2026-04-05) — Pipeline refactoring
+- **Breaking internal change**: Discovery and import are now decoupled. `fetchPDF()` is a thin compatibility wrapper; the real work is done by `SourceResolver → PDFResolver → AttachmentImporter`.
+- New modules: `identifiers.mjs`, `source-resolvers.mjs`, `pdf-resolvers.mjs`, `importer.mjs`
+- New `IdentifierExtractor` scans DOI field, URL field, Extra field, archiveID, and DOI-in-URL patterns
+- New `HtmlLandingPDFResolver` correctly extracts PDF links from publisher landing pages using `responseType: "document"` + DOM parsing. Strategies: `citation_pdf_url` meta, `<link rel="alternate">`, `<iframe>`/`<embed>`, and PDF anchors
+- New `PublisherPatternResolver` with host-specific DOM rules for: Springer, Nature, Wiley, Taylor & Francis, ACS, IEEE, MDPI, Frontiers, Elsevier/ScienceDirect, SciELO.br
+- `InstitutionalProxySourceResolver` now also routes Semantic Scholar PDF URLs through the proxy
+- New `DoiLandingSourceResolver` for explicit DOI landing page resolution
+- `requestTimeoutMs` preference added (`extensions.zotfetch.requestTimeoutMs`, default 15 000 ms)
+- All failure reasons now logged with structured context (source, host, method, elapsed ms)
+- `tests/pipeline.test.mjs` added covering 20+ scenarios
+
 ### v1.2.0 (2026-03-21)
-- All menu items consolidated under a single **ZotFetch ▶** submenu in the right-click context menu
+- All menu items consolidated under a single **ZotFetch ▶** submenu
 - Separators added between download actions, retry actions, and preferences
 
 ### v1.1.0 (2026-03-19)
@@ -155,16 +216,9 @@ Contributions via pull requests are welcome.
 - Fast Mode and Ultra Fast Mode with two-pass download strategy
 - Live color-coded progress display
 - Retry Failed Items and Retry After Auth commands
-- Failure classification pipeline (captcha / auth / blocked / timeout / nopdf / network)
-- Per-domain adaptive backoff with exponential extra delay on failures
-- DOI lookup via CrossRef for items missing a DOI
-- Expanded to 7 Sci-Hub mirrors ordered by reliability
-- Fixed diacritic normalization in title similarity matching
-- Fixed `hasPDF` missing `await` causing incorrect domain success tracking
-- Removed `encodeURIComponent` on Sci-Hub DOI path (broke most mirrors)
-- Dead prefs (`maxRetries`, `exportStats`) removed
+- Failure classification pipeline
+- Per-domain adaptive backoff
+- DOI lookup via CrossRef
 
 ### v1.0.0
-- Initial release: Native OA, Unpaywall, Sci-Hub, CAPES fallback
-- Anti-captcha consecutive counter with 30-minute domain cooldown
-
+- Initial release: Native OA, Unpaywall, CAPES fallback

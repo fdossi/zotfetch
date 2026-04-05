@@ -76,9 +76,26 @@ class CooldownManager {
     this.domainLastRequest.set(domain, Date.now());
   }
 
+  // Jitter increased to 60% to break rhythmic request patterns detectable by WAFs.
   async sleepWithJitter(baseMs) {
-    const jitter = Math.floor(baseMs * 0.3 * (Math.random() * 2 - 1));
+    const jitter = Math.floor(baseMs * 0.6 * (Math.random() * 2 - 1));
     await new Promise(r => setTimeout(r, Math.max(500, baseMs + jitter)));
+  }
+
+  // Immediately set a penalty cooldown for a domain (e.g., after Cloudflare challenge).
+  // Bypasses the 3-strike captcha counter — takes effect on the next isDomainCoolingDown check.
+  applyPenaltyCooldown(domain, ms) {
+    this.domainCooldowns.set(domain, Date.now() + ms);
+    Zotero.debug(`[ZotFetch] Penalty cooldown ${ms / 1000}s applied to ${domain}`);
+  }
+
+  // Random micro-delay of 2–5 s for protected/challenge-protected domains.
+  // Simulates human page-load time before a download attempt, reducing the
+  // behavioural fingerprint left by near-instant automated requests.
+  async applyProtectedDelay() {
+    const wait = 2000 + Math.floor(Math.random() * 3000);
+    Zotero.debug(`[ZotFetch] Protected micro-delay: ${wait}ms`);
+    await new Promise(r => setTimeout(r, wait));
   }
 }
 

@@ -2,11 +2,14 @@
 // Preferences manager
 
 const PREF_PREFIX = 'extensions.zotfetch.';
+// Used when the user has not configured a personal e-mail.
+// Keeps the real address out of plain-text query parameters (?email=&mailto=).
+const FALLBACK_EMAIL = 'zotfetch@gmail.com';
 
 class ZotFetchPrefs {
   static getUnpaywallEmail() {
     const email = Zotero.Prefs.get(PREF_PREFIX + 'unpaywallEmail', true) || '';
-    return this.isValidEmail(email) ? email : '';
+    return this.isValidEmail(email) ? email : FALLBACK_EMAIL;
   }
 
   static isCapesEnabled() {
@@ -53,6 +56,11 @@ class ZotFetchPrefs {
   static getDomainGapMs() {
     const ms = parseInt(Zotero.Prefs.get(PREF_PREFIX + 'domainGapMs', true), 10);
     return Number.isFinite(ms) && ms >= 0 ? ms : 3000;
+  }
+
+  static getRequestTimeoutMs() {
+    const ms = parseInt(Zotero.Prefs.get(PREF_PREFIX + 'requestTimeoutMs', true), 10);
+    return Number.isFinite(ms) && ms >= 5000 ? ms : 15000;
   }
 
   static getProxyUrl() {
