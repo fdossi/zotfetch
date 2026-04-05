@@ -467,36 +467,6 @@ class ZotFetch {
     return null;
   }
 
-  static async fetchPDF(item, url, source) {
-    if (!url || !/^https?:\/\//i.test(String(url))) {
-      return false;
-    }
-
-    const domain = Utils.getDomain(url);
-    if (ZotFetchPrefs.isAntiCaptchaMode() && this.cooldown.isDomainCoolingDown(domain)) {
-      return false;
-    }
-
-    // Micro-delay for domains known to run Cloudflare or similar edge challenges.
-    const isProtectedSource = source.includes("Sci-Hub") ||
-                              source.includes("CAPES") ||
-                              source.includes("Institutional");
-    if (isProtectedSource) {
-      await this.cooldown.applyProtectedDelay();
-    }
-
-    await this.cooldown.honorDomainGap(domain, ZotFetchPrefs);
-
-    try {
-      // Randomised browser fingerprint — rotates on every call.
-      const headers = {
-        ...Utils.getStealthHeaders(),
-        "Accept": "application/pdf,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "DNT": "1"
-      };
-
-      // Different referer for institutional vs public sources
   // ── Legacy fetchPDF (kept for any edge callers) ───────────────────────────
   // Wraps the candidate system; treat the URL as a direct-pdf or landing-page
   // candidate, resolve it, then import.
