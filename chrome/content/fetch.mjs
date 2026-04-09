@@ -374,22 +374,29 @@ class ZotFetch {
           ZotFetch._lastFetchReason = reason;
         }
 
-        // ── Protected-host early abort on challenge ────────────────────────────
-        // When a protected publisher serves a challenge/auth-wall (HTTP 200 or
-        // 4xx), immediately:
-        //  1. Mark the host as exhausted for this item (skips remaining candidates).
-        //  2. Add to session negative cache (blocks cross-batch retries).
-        //  3. Apply a penalty cooldown proportional to the policy TTL.
-        if (hostPolicy && hostPolicy.earlyAbortOnChallenge &&
-            (reason === "captcha" || reason === "cloudflare" ||
-             reason === "blocked" || reason === "auth")) {
+        // ── Protected-host early abort on challenge or unextractable page ────────
+        // Challenge events (captcha/cloudflare/blocked/auth): persistent negative
+        // cache entry + longer cooldown — blocks this (doi, host) for the rest of
+        // the session.
+        // "nopdf" on a protected host is a soft failure: the page loaded but no
+        // PDF could be extracted — almost always a paywalled JS-SPA or a page
+        // the extractor can't parse.  Apply only a short batch-level cooldown
+        // (no negativeCache entry) so subsequent items skip this publisher instead
+        // of each generating their own N requests, which triggers Elsevier/Wiley
+        // bot-detection after the 3rd–4th consecutive hit from the same IP.
+        const isChallenge   = reason === "captcha" || reason === "cloudflare" ||
+                              reason === "blocked" || reason === "auth";
+        const isSoftFailure = reason === "nopdf";
+        if (hostPolicy && hostPolicy.earlyAbortOnChallenge && (isChallenge || isSoftFailure)) {
           _localHostAborts.add(effectiveHost);
-          if (ids.doi) {
+          if (isChallenge && ids.doi) {
             ZotFetch.negativeCache.add(ids.doi, effectiveHost, reason, hostPolicy);
           }
-          const penaltyMs = (reason === "auth")
-            ? Math.min((hostPolicy.negativeCacheTtlAuthMs || 45 * 60 * 1000) / 3, 15 * 60 * 1000)
-            : Math.min((hostPolicy.negativeCacheTtlMs    ||  6 * 60 * 60 * 1000) / 10, 36 * 60 * 1000);
+          const penaltyMs = isSoftFailure
+            ? Math.min((hostPolicy.negativeCacheTtlAuthMs || 45 * 60 * 1000) / 9, 5 * 60 * 1000)
+            : (reason === "auth"
+                ? Math.min((hostPolicy.negativeCacheTtlAuthMs || 45 * 60 * 1000) / 3, 15 * 60 * 1000)
+                : Math.min((hostPolicy.negativeCacheTtlMs    ||  6 * 60 * 60 * 1000) / 10, 36 * 60 * 1000));
           this.cooldown.applyPenaltyCooldown(effectiveHost, penaltyMs);
           Zotero.debug(
             `[ZotFetch][ProtectedHost] Early abort: host=${effectiveHost} reason=${reason} ` +

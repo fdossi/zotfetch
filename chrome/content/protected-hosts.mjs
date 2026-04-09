@@ -195,7 +195,10 @@ function detectChallengeInDoc(doc) {
       bodyText.includes("subscribe to access") ||
       bodyText.includes("unlock full access") ||
       bodyText.includes("this article requires a subscription") ||
-      bodyText.includes("full text available to subscribers")) {
+      bodyText.includes("full text available to subscribers") ||
+      bodyText.includes("access through your institution") ||
+      bodyText.includes("you do not have access to this content") ||
+      bodyText.includes("get access to the full")) {
     return "auth";
   }
 
@@ -203,7 +206,8 @@ function detectChallengeInDoc(doc) {
   if (bodyText.includes("log in to access") ||
       bodyText.includes("sign in to access this article") ||
       bodyText.includes("institutional login required") ||
-      bodyText.includes("please log in to continue")) {
+      bodyText.includes("please log in to continue") ||
+      bodyText.includes("sign in to view full")) {
     return "auth";
   }
 
@@ -243,7 +247,9 @@ function detectChallengeInText(text) {
       lower.includes("subscribe to access") ||
       lower.includes("unlock full access") ||
       lower.includes("log in to access") ||
-      lower.includes("sign in to access this article")) {
+      lower.includes("sign in to access this article") ||
+      lower.includes("access through your institution") ||
+      lower.includes("you do not have access to this content")) {
     return "auth";
   }
 

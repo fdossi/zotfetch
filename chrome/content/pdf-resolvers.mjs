@@ -265,10 +265,17 @@ const PUBLISHER_RULES = [
     extract(doc, base) {
       const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
       if (meta) return _resolveUrl(meta, base);
-      // ScienceDirect embeds the PDF URL in a JS config; try a regex heuristic.
+      // ScienceDirect embeds the PDF URL in JavaScript config blocks.
+      // Try multiple JSON key patterns — ScienceDirect's structure changes
+      // over time and the original [^}] pattern stopped at the first brace.
       const scripts = Array.from(doc.querySelectorAll("script:not([src])"));
       for (const s of scripts) {
-        const m = s.textContent.match(/"pdf":\s*\{[^}]*"downloadUrl"\s*:\s*"([^"]+)"/i);
+        const text = s.textContent;
+        if (!text.includes("pdf")) continue;
+        const m =
+          text.match(/"pdf"\s*:\s*\{[^{}]*"downloadUrl"\s*:\s*"([^"]+)"/i) ||
+          text.match(/"downloadUrl"\s*:\s*"(https?:[^"]*\/pdf(?:ft)?[^"]*)"/i) ||
+          text.match(/"pdfUrl"\s*:\s*"(https?:[^"]*\/pdf(?:ft)?[^"]*)"/i);
         if (m) return _resolveUrl(m[1].replace(/\\u002F/g, "/"), base);
       }
       return null;
@@ -292,13 +299,19 @@ const PUBLISHER_RULES = [
 var PublisherPatternResolver = class {
   canResolve(candidate) {
     if (candidate.kind !== "landing-page") return false;
-    const host = Utils.getDomain(candidate.url);
+    // Use meta.publisherHost when the candidate URL is an intermediary (e.g.
+    // doi.org) that redirects to the real publisher.  DoiLandingSourceResolver
+    // tags doi.org candidates with meta.publisherHost = "sciencedirect.com"
+    // etc., so the correct publisher rule is applied without waiting for the
+    // redirect to be followed.
+    const host = candidate.meta?.publisherHost || Utils.getDomain(candidate.url);
     return PUBLISHER_RULES.some(r => r.hostPattern.test(host));
   }
 
   async resolve(candidate, ctx) {
     const t0   = Date.now();
-    const host  = Utils.getDomain(candidate.url);
+    // Use meta.publisherHost so doi.org redirect candidates use the right rule.
+    const host  = candidate.meta?.publisherHost || Utils.getDomain(candidate.url);
     const rule  = PUBLISHER_RULES.find(r => r.hostPattern.test(host));
     const policy = ProtectedHosts.getHostPolicy(host);
 
@@ -386,9 +399,9 @@ var HtmlLandingPDFResolver = class {
   canResolve(candidate) {
     if (candidate.kind !== "landing-page") return false;
     // Don't re-fetch URLs already handled by PublisherPatternResolver.
-    // That resolver now falls back to generic extraction on the same GET,
-    // so issuing a second GET here would be a redundant duplicate request.
-    const host = Utils.getDomain(candidate.url);
+    // Check meta.publisherHost too: doi.org candidates tagged with a known
+    // publisher host are handled by PublisherPatternResolver, not here.
+    const host = candidate.meta?.publisherHost || Utils.getDomain(candidate.url);
     if (PUBLISHER_RULES.some(r => r.hostPattern.test(host))) return false;
     return true;
   }
