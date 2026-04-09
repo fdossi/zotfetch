@@ -191,7 +191,7 @@ ZotFetch tracks request history per domain:
 
 ## License
 
-Released under the [GNU General Public License v3.0](LICENSE).
+Released under the [MIT License](LICENSE).
 
 Contributions via pull requests are welcome.
 
@@ -213,9 +213,10 @@ THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPL
 - **New**: Cross-item domain cooldown — the first captcha from a publisher during a batch blocks all subsequent items from hitting that same publisher in the same run.
 - **New**: `NativeSourceResolver` and `NativeDoiSourceResolver` now skip known bot-detection publishers (Elsevier, Wiley, Springer, ACS) entirely — preventing Zotero's native UA from triggering captcha floods.
 - **New**: `native-doi` sentinel now checks `negativeCache` and `_localHostAborts` before firing, preventing redundant requests.
-- **Fix**: `ScihubPDFResolver` now correctly returns `failureReason: "cloudflare"` (was `"captcha"`) so the priority tracker uses the correct severity.
+- **Removed**: Sci-Hub integration removed from the plugin entirely.
 - **Fix**: `OaRepositorySourceResolver` tests corrected to use `itemUrl` identifier key.
 - **Updated**: Browser User-Agent strings refreshed — Chrome 132→135, Edge 132→135, Firefox 135→136, Safari 17→18.
+- **License**: Changed from GPLv3 to MIT.
 - **Author**: Updated author from "Fabio" to "Fabio Dossi".
 
 ### v1.3.0 (2026-04-05) — Pipeline refactoring

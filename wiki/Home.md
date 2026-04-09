@@ -2,7 +2,7 @@
 
 **ZotFetch** is a Zotero 8 plugin that automatically downloads PDFs for entire library selections using a smart multi-source pipeline. This manual covers everything you need to start downloading PDFs and configuring institutional access.
 
-> **Version:** 1.4.0 · **Author:** Fabio Dossi · **License:** GPLv3  
+> **Version:** 1.4.0 · **Author:** Fabio Dossi · **License:** MIT  
 > **Repository:** https://github.com/fdossi/zotfetch
 
 ---
@@ -68,13 +68,13 @@ Access all commands via **right-click → ZotFetch ▶**:
 Two-pass strategy:
 
 - **Pass 1** — tries all open-access sources (Zotero Native OA, Unpaywall, Semantic Scholar, OpenAlex, Europe PMC, CORE, OA Repository, DOI Landing, Institutional Proxy).
-- **Pass 2** — runs only for items that failed Pass 1, using Sci-Hub mirrors and CAPES.
+- **Pass 2** — runs only for items that failed Pass 1, using CAPES.
 
-**Result:** Most items are resolved in Pass 1 using safe OA sources. Only genuinely paywalled items hit Sci-Hub/CAPES.
+**Result:** Most items are resolved in Pass 1 using safe OA sources. Only genuinely paywalled items hit CAPES.
 
 ### Ultra Fast Mode
 
-Everything runs in a single pass. Sci-Hub is limited to 2 mirrors (configurable). CAPES is skipped. Best for quick sweeps of large collections when you want maximum speed and will retry failures later.
+Everything runs in a single pass. CAPES is skipped. Best for quick sweeps of large collections when you want maximum speed and will retry failures later.
 
 ### Full Mode
 
@@ -100,7 +100,7 @@ ZotFetch tries sources in priority order. As soon as one succeeds, it imports th
 | 75 | **Institutional Proxy** | Wraps the DOI URL through your configured proxy. Also routes Semantic Scholar PDF URLs through the proxy. |
 | 72 | **Institutional Proxy (S2)** | S2 OA PDF URL routed through your proxy. |
 | 70 | **CAPES** | CAPES Periódicos portal (Brazil). Only in Batch Download 2nd pass and Retry. |
-| 60–50 | **Sci-Hub** | Multiple mirrors tried in sequence. Only when enabled. Only in Ultra Fast, Batch 2nd pass, and Retry. |
+
 
 When a source returns a **landing page** (not a direct PDF URL), ZotFetch parses the HTML using publisher-specific rules for Springer, Nature, Wiley, Taylor & Francis, ACS, IEEE, MDPI, Frontiers, Elsevier/ScienceDirect, and SciELO.br — with a generic extractor (`citation_pdf_url` meta tag, `<link rel="alternate">`, iframe/embed, PDF anchors) as a universal fallback.
 
@@ -212,8 +212,6 @@ If you leave the CAPES Gateway URL blank but keep the toggle on, ZotFetch sends 
 | **CAPES Gateway URL** | *(empty)* | CAPES portal gateway URL. Only used when the CAPES toggle is on. |
 | **Enable CAPES Portal** | On | Enables the CAPES source resolver. |
 | **Fast Mode** | On | Two-pass download strategy. Recommended. Turn off only if you want everything in one pass. |
-| **Enable Sci-Hub** | On | Enables Sci-Hub mirrors as a last resort. Enable only where permitted by local law. |
-| **Sci-Hub mirrors (Ultra Fast)** | 2 | How many Sci-Hub mirrors to try in Ultra Fast mode (1–10). |
 | **Batch size** | 30 | Maximum items processed per Batch Download run. |
 | **Delay between items (ms)** | 900 | Base pause between processing each item. ±60% jitter applied automatically. |
 | **Domain gap (ms)** | 1500 | Minimum pause between successive requests to the same domain. |

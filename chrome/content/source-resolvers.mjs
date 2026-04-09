@@ -632,57 +632,6 @@ var CapesSourceResolver = class {
   }
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ScihubSourceResolver
-// Constructs Sci-Hub landing page candidates for each mirror.
-// The HTML page embeds the real PDF URL which is extracted by ScihubPDFResolver.
-// NOTE: Sci-Hub is provided as a fallback for regions/institutions where it
-// is the only practical option. Enable only via the preferences toggle.
-// ─────────────────────────────────────────────────────────────────────────────
-var ScihubSourceResolver = class {
-  constructor() { this.id = "scihub"; }
-
-  enabled() { return ZotFetchPrefs.isScihubEnabled(); }
-
-  async buildCandidates(_item, ids) {
-    if (!ids.doi) return [];
-
-    const mirrors = [
-      "sci-hub.se",
-      "sci-hub.st",
-      "sci-hub.ru",
-      "sci-hub.it",
-      "sci-hub.cat",
-      "sci-hub.ren",
-      "sci-hub.hkvisa.net",
-      "sci-hub.usualwant.com",
-      "sci-hub.41849.com",
-      "sci-hub.p2p.cx"
-    ];
-
-    const maxMirrors = Number.isFinite(ZotFetchPrefs.getFastMirrorLimit())
-      ? ZotFetchPrefs.getFastMirrorLimit()
-      : mirrors.length;
-
-    return mirrors
-      .filter(m => !ZotFetch.cooldown.isDomainCoolingDown(m))
-      .slice(0, maxMirrors)
-      .map((mirror, i) => ({
-        sourceId: "scihub",
-        label: "Sci-Hub",
-        url: `https://${mirror}/${ids.doi}`,
-        kind: "landing-page",
-        priority: 60 - i,
-        meta: { scihub: true, mirror },
-        headers: {
-          ...Utils.getStealthHeaders(),
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          Referer: "https://www.google.com/"
-        }
-      }));
-  }
-};
-
 // Expose the DOI-prefix → publisher-host helper so fetch.mjs can apply the
 // same protected-host checks inside the native/native-doi sentinel handlers.
 this.ZotFetchPublisherHostFromDoi = _publisherHostFromDoi;
@@ -697,4 +646,3 @@ this.NativeDoiSourceResolver = NativeDoiSourceResolver;
 this.DoiLandingSourceResolver = DoiLandingSourceResolver;
 this.InstitutionalProxySourceResolver = InstitutionalProxySourceResolver;
 this.CapesSourceResolver = CapesSourceResolver;
-this.ScihubSourceResolver = ScihubSourceResolver;

@@ -16,7 +16,7 @@
 //           ├─ DirectPDFResolver            — kind=direct-pdf
 //           ├─ PublisherPatternResolver     — landing-page, known hosts
 //           ├─ HtmlLandingPDFResolver       — landing-page, generic extraction
-//           └─ ScihubPDFResolver            — landing-page, Sci-Hub embed
+//           └─ HtmlLandingPDFResolver         — generic meta/link/iframe/anchor extraction
 //         AttachmentImporter.importResolvedPdf()
 //
 // Adding a new source: implement SourceResolver and add it to _buildSourceResolvers().
@@ -104,7 +104,6 @@ class ZotFetch {
       core: 0,
       europepmc: 0,
       institutional: 0,
-      scihub: 0,
       capes: 0,
       deferred: 0,
       notFound: 0,
@@ -191,7 +190,7 @@ class ZotFetch {
     }
 
     progress.setText(
-      `${this.getProgressStatus(stats, batch.length, batch.length, true)} Concluído: ${stats.downloaded} baixados (nativo ${stats.native}, Unpaywall ${stats.unpaywall}, S2 ${stats.semanticscholar}, OA ${stats.openalex}, CORE ${stats.core}, EPMC ${stats.europepmc}, Institucional ${stats.institutional}, Sci-Hub ${stats.scihub}, CAPES ${stats.capes}) | pendentes ${stats.deferred} | DOI recuperado ${stats.doiRecovered} | não encontrado ${stats.notFound} | erros ${stats.failed} | captcha ${stats.captcha}`
+      `${this.getProgressStatus(stats, batch.length, batch.length, true)} Concluído: ${stats.downloaded} baixados (nativo ${stats.native}, Unpaywall ${stats.unpaywall}, S2 ${stats.semanticscholar}, OA ${stats.openalex}, CORE ${stats.core}, EPMC ${stats.europepmc}, Institucional ${stats.institutional}, CAPES ${stats.capes}) | pendentes ${stats.deferred} | DOI recuperado ${stats.doiRecovered} | não encontrado ${stats.notFound} | erros ${stats.failed} | captcha ${stats.captcha}`
     );
     progress.setProgress(100);
     progressWindow.startCloseTimer(10000);
@@ -204,9 +203,9 @@ class ZotFetch {
    *
    * Modes:
    *   "fast"     — native + unpaywall + s2 + openalex + oa-repo + doi-landing + proxy;
-   *                no Sci-Hub; defers to fallback pass on failure.
-   *   "ultra"    — fast sources + limited Sci-Hub mirrors; no fallback pass.
-   *   "fallback" — Sci-Hub (full mirror list) + CAPES.
+   *                defers to fallback pass on failure.
+   *   "ultra"    — fast sources; no fallback pass.
+   *   "fallback" — CAPES only.
    *   "full"     — all sources, no deferral.
    */
   static async processItem(item, stats, mode = "full") {
@@ -416,7 +415,7 @@ class ZotFetch {
         else if (sid === "europepmc")        stats.europepmc++;
         else if (sid.startsWith("institutional-proxy")) stats.institutional++;
         else if (sid === "capes")            stats.capes++;
-        else if (sid === "scihub")           stats.scihub++;
+
         else                                 stats.unpaywall++; // oa-repo / doi-landing → unpaywall bucket
         return sid;
       }
@@ -453,17 +452,16 @@ class ZotFetch {
       new InstitutionalProxySourceResolver()
     ];
     if (mode === "fast")     return fast;
-    if (mode === "ultra")    return [...fast, new ScihubSourceResolver()];
-    if (mode === "fallback") return [new ScihubSourceResolver(), new CapesSourceResolver()];
+    if (mode === "ultra")    return fast;
+    if (mode === "fallback") return [new CapesSourceResolver()];
     // "full" — all sources
-    return [...fast, new ScihubSourceResolver(), new CapesSourceResolver()];
+    return [...fast, new CapesSourceResolver()];
   }
 
   /** Return the ordered list of PDFResolvers. */
   static _buildPdfResolvers() {
     return [
       new DirectPDFResolver(),
-      new ScihubPDFResolver(),
       new PublisherPatternResolver(),
       new HtmlLandingPDFResolver()
     ];
@@ -553,28 +551,6 @@ class ZotFetch {
     return this._trySourceResolver(item, new CapesSourceResolver(), ids);
   }
 
-  static async tryScihub(item, doi, maxMirrors = null) {
-    const ids = doi ? { doi } : await IdentifierExtractor.fromItem(item);
-    const resolver = new ScihubSourceResolver();
-    if (!resolver.enabled()) return false;
-
-    let candidates;
-    try { candidates = await resolver.buildCandidates(item, ids); } catch (err) { Zotero.logError(err); return false; }
-
-    const selected = Number.isFinite(maxMirrors) && maxMirrors > 0
-      ? candidates.slice(0, maxMirrors)
-      : candidates;
-
-    const pdfResolvers = this._buildPdfResolvers();
-    for (const candidate of selected) {
-      const result = await this._resolveCandidate(candidate, pdfResolvers);
-      if (!result.ok) continue;
-      const ok = await AttachmentImporter.importResolvedPdf(item, result, candidate.label);
-      if (ok) return true;
-    }
-    return false;
-  }
-
   /** Try all candidates from one SourceResolver and import the first success. */
   static async _trySourceResolver(item, sourceResolver, ids) {
     if (!sourceResolver.enabled()) return false;
@@ -589,64 +565,6 @@ class ZotFetch {
       if (ok) return true;
     }
     return false;
-  }
-
-  // ── Sci-Hub utilities (used by ScihubPDFResolver) ───────────────────────
-
-  static isCloudflareChallengePage(html) {
-    const lower = html.toLowerCase();
-    return lower.includes("cf-challenge") ||
-           lower.includes("cf_chl") ||
-           lower.includes("turnstile") ||
-           lower.includes("jschl_vc") ||
-           lower.includes("checking if the site connection is secure") ||
-           lower.includes("enable javascript and cookies to continue");
-  }
-
-  // Parses a Sci-Hub HTML landing page and extracts the direct hosted PDF URL.
-  // Sci-Hub embeds the PDF in an <embed>, <iframe id="pdf">, or JS redirect.
-  static extractScihubPdfUrl(html, mirrorOrigin) {
-    if (!html) return null;
-
-    // Pattern 1: <embed src="//dacemirror.sci-hub.se/.../file.pdf#...">
-    const embedMatch = html.match(/<embed[^>]+src=["']([^"']+)["']/i);
-    if (embedMatch) {
-      const src = embedMatch[1].split("#")[0].trim();
-      if (src && (src.toLowerCase().includes(".pdf") || src.includes("/pdf"))) {
-        return this.resolveRelativeUrl(src, mirrorOrigin);
-      }
-    }
-
-    // Pattern 2: <iframe id="pdf" src="...">
-    const iframeMatch =
-      html.match(/<iframe[^>]+id=["']pdf["'][^>]*src=["']([^"']+)["']/i) ||
-      html.match(/<iframe[^>]+src=["']([^"']+)["'][^>]*id=["']pdf["']/i);
-    if (iframeMatch) {
-      const src = iframeMatch[1].split("#")[0].trim();
-      if (src && !src.toLowerCase().includes("captcha") && !src.includes("challenge")) {
-        return this.resolveRelativeUrl(src, mirrorOrigin);
-      }
-    }
-
-    // Pattern 3: JS redirect — onclick / location.href
-    const onclickMatch = html.match(/onclick\s*=\s*["'][^"']*location\.href\s*=\s*'([^']+)'[^"']*["']/i);
-    if (onclickMatch) {
-      const src = onclickMatch[1].split("?")[0].trim();
-      if (src.toLowerCase().includes(".pdf")) {
-        return this.resolveRelativeUrl(src, mirrorOrigin);
-      }
-    }
-
-    return null;
-  }
-
-  // Resolves protocol-relative and root-relative URLs to absolute HTTPS.
-  static resolveRelativeUrl(url, origin) {
-    if (!url) return null;
-    if (/^https?:\/\//i.test(url)) return url;
-    if (url.startsWith("//")) return "https:" + url;
-    if (url.startsWith("/")) return origin + url;
-    return null;
   }
 
   // ── Legacy fetchPDF (kept for any edge callers) ───────────────────────────

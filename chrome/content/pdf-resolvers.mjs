@@ -384,7 +384,7 @@ var PublisherPatternResolver = class {
 // ─────────────────────────────────────────────────────────────────────────────
 var HtmlLandingPDFResolver = class {
   canResolve(candidate) {
-    if (candidate.kind !== "landing-page" || candidate.meta?.scihub) return false;
+    if (candidate.kind !== "landing-page") return false;
     // Don't re-fetch URLs already handled by PublisherPatternResolver.
     // That resolver now falls back to generic extraction on the same GET,
     // so issuing a second GET here would be a redundant duplicate request.
@@ -512,71 +512,6 @@ var HtmlLandingPDFResolver = class {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ScihubPDFResolver
-// Handles Sci-Hub landing pages. Extracts the embedded PDF URL and verifies
-// the page is not a Cloudflare challenge before attempting download.
-// ─────────────────────────────────────────────────────────────────────────────
-var ScihubPDFResolver = class {
-  canResolve(candidate) {
-    return candidate.kind === "landing-page" && !!candidate.meta?.scihub;
-  }
-
-  async resolve(candidate, ctx) {
-    const t0 = Date.now();
-    const mirror = candidate.meta?.mirror || Utils.getDomain(candidate.url);
-    ctx.logger(`[ScihubPDFResolver] Mirror ${mirror} → ${candidate.url.substring(0, 80)}`);
-
-    if (ZotFetchPrefs.isAntiCaptchaMode()) {
-      await ctx.cooldown.applyProtectedDelay();
-    }
-    await ctx.cooldown.honorDomainGap(mirror, ZotFetchPrefs);
-
-    try {
-      const resp = await Zotero.HTTP.request("GET", candidate.url, {
-        responseType: "text",
-        timeout: ctx.timeoutMs,
-        headers: candidate.headers || {}
-      });
-
-      const html = String(resp.response || resp.responseText || "");
-
-      if (ZotFetch.isCloudflareChallengePage(html)) {
-        ctx.cooldown.applyPenaltyCooldown(mirror, 60000);
-        ctx.logger(`[ScihubPDFResolver] Cloudflare challenge on ${mirror}`);
-        return { ok: false, failureReason: "cloudflare" };
-      }
-
-      ctx.cooldown.markDomainSuccess(mirror);
-      const pdfUrl = ZotFetch.extractScihubPdfUrl(html, `https://${mirror}`);
-      if (!pdfUrl) {
-        ctx.logger(`[ScihubPDFResolver] No embedded PDF URL on ${mirror}`);
-        return { ok: false, failureReason: "nopdf" };
-      }
-
-      ctx.logger(`[ScihubPDFResolver] Resolved: ${pdfUrl.substring(0, 80)} (${Date.now() - t0}ms)`);
-      return {
-        ok: true,
-        finalPdfUrl: pdfUrl,
-        method: "scihub",
-        headers: {
-          Referer: `https://${mirror}/`,
-          ...Utils.getStealthHeaders()
-        }
-      };
-    } catch (error) {
-      const reason = _classifyHttpError(error);
-      if (reason === "cloudflare" || reason === "captcha") {
-        ctx.cooldown.applyPenaltyCooldown(mirror, 60000);
-      } else {
-        ctx.cooldown.markDomainNonCaptcha(mirror);
-      }
-      ctx.logger(`[ScihubPDFResolver] Error ${reason} on ${mirror}`);
-      return { ok: false, failureReason: reason };
-    }
-  }
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Shared: validate that a URL actually serves a PDF.
 //
 // landingUrl (optional) — the publisher page URL that yielded this URL;
@@ -625,4 +560,3 @@ async function _validatePdf(url, headers, ctx, landingUrl) {
 this.DirectPDFResolver = DirectPDFResolver;
 this.PublisherPatternResolver = PublisherPatternResolver;
 this.HtmlLandingPDFResolver = HtmlLandingPDFResolver;
-this.ScihubPDFResolver = ScihubPDFResolver;

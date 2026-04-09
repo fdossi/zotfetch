@@ -307,24 +307,11 @@ button.danger { color: #c0392b; }
     <input type="checkbox" id="f-fast"/>
     <label for="f-fast">
       <strong>Fast Mode</strong> &#x2014; 2-pass strategy:
-      OA sources first; Sci-Hub only on the fallback pass (recommended)
-    </label>
-  </div>
-
-  <div class="row">
-    <input type="checkbox" id="f-scihub"/>
-    <label for="f-scihub">
-      Enable <strong>Sci-Hub</strong> fallback
-      <span style="color:GrayText;font-weight:400"> &#x2014; use only where permitted by local law</span>
+      OA sources first; CAPES only on the fallback pass (recommended)
     </label>
   </div>
 
   <div class="grid2" style="margin-top:10px">
-    <div class="field">
-      <label for="f-mirrors">Sci-Hub mirrors (Ultra-Fast mode)</label>
-      <input type="number" id="f-mirrors" min="1" max="10" step="1"/>
-      <p class="hint">Fewer = faster, more = higher success rate</p>
-    </div>
     <div class="field">
       <label for="f-batch">Batch size (max items per run)</label>
       <input type="number" id="f-batch" min="1" max="500" step="1"/>
@@ -393,8 +380,6 @@ const DEFAULTS = {
   enableCapesFallback:   true,
   proxyUrl:              "",
   fastMode:              true,
-  enableScihubFallback:  true,
-  fastMirrorLimit:       2,
   batchSize:             30,
   requestDelayMs:        900,
   domainGapMs:           1500,
@@ -418,8 +403,6 @@ function load() {
   g("f-capes-on").checked    = pget("enableCapesFallback") !== false;
   g("f-capes-url").value     = pget("proxyUrl")              || "";
   g("f-fast").checked        = pget("fastMode")              !== false;
-  g("f-scihub").checked      = pget("enableScihubFallback")  !== false;
-  g("f-mirrors").value       = pget("fastMirrorLimit")       ?? 2;
   g("f-batch").value         = pget("batchSize")             ?? 30;
   g("f-delay").value         = pget("requestDelayMs")        ?? 900;
   g("f-gap").value           = pget("domainGapMs")           ?? 1500;
@@ -460,7 +443,6 @@ function validate() {
     return false;
   }
   var numRules = [
-    ["f-mirrors",  "Sci-Hub mirror limit",   1,    10],
     ["f-batch",    "Batch size",             1,   500],
     ["f-delay",    "Delay between items",    0, 30000],
     ["f-gap",      "Domain gap",             0, 30000],
@@ -491,8 +473,6 @@ function saveAndClose() {
   pset("enableCapesFallback",   g("f-capes-on").checked);
   pset("proxyUrl",              g("f-capes-url").value.trim());
   pset("fastMode",              g("f-fast").checked);
-  pset("enableScihubFallback",  g("f-scihub").checked);
-  pset("fastMirrorLimit",       parseInt(g("f-mirrors").value,   10));
   pset("batchSize",             parseInt(g("f-batch").value,     10));
   pset("requestDelayMs",        parseInt(g("f-delay").value,     10));
   pset("domainGapMs",           parseInt(g("f-gap").value,       10));
@@ -513,8 +493,6 @@ function resetDefaults() {
   g("f-capes-on").checked    = DEFAULTS.enableCapesFallback;
   g("f-capes-url").value     = DEFAULTS.proxyUrl;
   g("f-fast").checked        = DEFAULTS.fastMode;
-  g("f-scihub").checked      = DEFAULTS.enableScihubFallback;
-  g("f-mirrors").value       = DEFAULTS.fastMirrorLimit;
   g("f-batch").value         = DEFAULTS.batchSize;
   g("f-delay").value         = DEFAULTS.requestDelayMs;
   g("f-gap").value           = DEFAULTS.domainGapMs;

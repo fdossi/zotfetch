@@ -16,10 +16,6 @@ class ZotFetchPrefs {
     return Zotero.Prefs.get(PREF_PREFIX + 'enableCapesFallback', true);
   }
 
-  static isScihubEnabled() {
-    return Zotero.Prefs.get(PREF_PREFIX + 'enableScihubFallback', true);
-  }
-
   static isAntiCaptchaMode() {
     return Zotero.Prefs.get(PREF_PREFIX + 'antiCaptchaMode', true);
   }
@@ -31,11 +27,6 @@ class ZotFetchPrefs {
 
   static isFastModeEnabled() {
     return Zotero.Prefs.get(PREF_PREFIX + 'fastMode', true);
-  }
-
-  static getFastMirrorLimit() {
-    const n = parseInt(Zotero.Prefs.get(PREF_PREFIX + 'fastMirrorLimit', true), 10);
-    return Number.isFinite(n) && n > 0 ? n : 2;
   }
 
   static getUnpaywallTimeoutMs() {

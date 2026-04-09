@@ -1,9 +1,7 @@
 pref("extensions.zotfetch.unpaywallEmail", "");
 pref("extensions.zotfetch.enableCapesFallback", true);
-pref("extensions.zotfetch.enableScihubFallback", true);
 pref("extensions.zotfetch.antiCaptchaMode", true);
 pref("extensions.zotfetch.fastMode", true);
-pref("extensions.zotfetch.fastMirrorLimit", 2);
 pref("extensions.zotfetch.unpaywallTimeoutMs", 12000);
 pref("extensions.zotfetch.crossrefTimeoutMs", 10000);
 pref("extensions.zotfetch.requestDelayMs", 900);

@@ -49,12 +49,10 @@ globalThis.Utils = {
 globalThis.ZotFetchPrefs = {
   getUnpaywallEmail: ()   => "test@example.com",
   isCapesEnabled:    ()   => true,
-  isScihubEnabled:   ()   => true,
   isAntiCaptchaMode: ()   => false,
   getRequestTimeoutMs: ()  => 5000,
   getUnpaywallTimeoutMs: () => 5000,
   getDomainGapMs:    () => 0,
-  getFastMirrorLimit: () => 2,
   getProxyUrl:       () => "",
   getInstitutionalProxyUrl: () => "https://proxy.example.edu/login?url=",
   isInstitutionalProxyEnabled: () => true
@@ -98,19 +96,6 @@ globalThis.ZotFetch = {
       ...(Array.isArray(data?.oa_locations) ? data.oa_locations.map(l => l?.url_for_pdf) : [])
     ];
     return list.filter(Boolean);
-  },
-  isCloudflareChallengePage(html) {
-    const lower = html.toLowerCase();
-    return lower.includes("cf-challenge") || lower.includes("cf_chl") ||
-           lower.includes("turnstile") || lower.includes("enable javascript and cookies");
-  },
-  extractScihubPdfUrl(html, mirrorOrigin) {
-    const embed = html.match(/<embed[^>]+src=["']([^"']+)["']/i);
-    if (embed) {
-      const src = embed[1].split("#")[0].trim();
-      if (src && src.toLowerCase().includes(".pdf")) return `https:${src.startsWith("//") ? "" : "//"}${src.replace(/^\/\//, "")}`;
-    }
-    return null;
   }
 };
 
@@ -484,48 +469,6 @@ await test("HtmlLandingPDFResolver: classifies 401 as auth failure", async () =>
   assert(result.failureReason === "auth", `Got: ${result.failureReason}`);
 });
 
-await test("ScihubPDFResolver: extracts embed src from Sci-Hub HTML", async () => {
-  const scihubHtml = `<html><body>
-    <embed src="//dacemirror.sci-hub.se/10.1000/test/paper.pdf#view=FitH" type="application/pdf">
-  </body></html>`;
-
-  Zotero.HTTP.request = async () => ({
-    response: scihubHtml,
-    responseText: scihubHtml
-  });
-
-  const resolver = new ScihubPDFResolver();
-  const candidate = {
-    kind: "landing-page",
-    url: "https://sci-hub.se/10.1000/test",
-    headers: {},
-    meta: { scihub: true, mirror: "sci-hub.se" }
-  };
-  const result = await resolver.resolve(candidate, mockCtx);
-  assert(result.ok, `Expected ok=true, got ${JSON.stringify(result)}`);
-  assert(result.finalPdfUrl.includes("dacemirror"), `URL: ${result.finalPdfUrl}`);
-  assert(result.method === "scihub");
-});
-
-await test("ScihubPDFResolver: returns cloudflare on Cloudflare challenge page", async () => {
-  const cfHtml = `<html><body>
-    <p>enable javascript and cookies to continue</p>
-  </body></html>`;
-
-  Zotero.HTTP.request = async () => ({ response: cfHtml, responseText: cfHtml });
-
-  const resolver = new ScihubPDFResolver();
-  const candidate = {
-    kind: "landing-page",
-    url: "https://sci-hub.se/10.1000/test",
-    headers: {},
-    meta: { scihub: true, mirror: "sci-hub.se" }
-  };
-  const result = await resolver.resolve(candidate, mockCtx);
-  assert(!result.ok);
-  assert(result.failureReason === "cloudflare", `Got: ${result.failureReason}`);
-});
-
 // ─── Test group: URL normalisation ────────────────────────────────────────────
 
 console.log("\nURL normalisation");
@@ -536,9 +479,9 @@ await test("relative URL is resolved against base", () => {
 });
 
 await test("protocol-relative URL becomes https", () => {
-  const raw = "//dacemirror.sci-hub.se/paper.pdf";
+  const raw = "//cdn.example.com/paper.pdf";
   const resolved = "https:" + raw;
-  assert(resolved === "https://dacemirror.sci-hub.se/paper.pdf");
+  assert(resolved === "https://cdn.example.com/paper.pdf");
 });
 
 // ─── Test group: buildProxyTargetURL ──────────────────────────────────────────
