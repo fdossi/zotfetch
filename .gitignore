@@ -11,6 +11,10 @@ __pycache__/
 # Backup files created by force_install.py
 *.bak-force-install
 
+# Publication drafts (local only, not for GitHub)
+wiki/ZoteroBlog.md
+wiki/Code4LibArticle.md
+
 # OS / editor noise
 .DS_Store
 Thumbs.db
