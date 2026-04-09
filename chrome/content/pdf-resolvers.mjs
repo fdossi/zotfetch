@@ -543,7 +543,7 @@ var ScihubPDFResolver = class {
       if (ZotFetch.isCloudflareChallengePage(html)) {
         ctx.cooldown.applyPenaltyCooldown(mirror, 60000);
         ctx.logger(`[ScihubPDFResolver] Cloudflare challenge on ${mirror}`);
-        return { ok: false, failureReason: "captcha" };
+        return { ok: false, failureReason: "cloudflare" };
       }
 
       ctx.cooldown.markDomainSuccess(mirror);

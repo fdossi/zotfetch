@@ -47,7 +47,7 @@ def create_xpi(with_latest=False, clean=False):
     files_to_include = [
         'manifest.json',
         'bootstrap.js',
-        'prefs.js',
+        'defaults/preferences/prefs.js',
         'chrome/content/utils.mjs',
         'chrome/content/prefs.mjs',
         'chrome/content/cooldown.mjs',
@@ -58,6 +58,7 @@ def create_xpi(with_latest=False, clean=False):
         'chrome/content/importer.mjs',
         'chrome/content/fetch.mjs',
         'chrome/content/ui.mjs',
+        'chrome/content/prefs-dialog.xhtml',
         'locale/en-US/zotfetch.ftl'
     ]
     version = get_version_from_manifest()

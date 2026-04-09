@@ -4,6 +4,8 @@
 
 [![DOI](https://zenodo.org/badge/1186582529.svg)](https://doi.org/10.5281/zenodo.19149482)
 
+**Author:** Fabio Dossi &nbsp;|&nbsp; **Version:** 1.4.0 &nbsp;|&nbsp; [📖 User Manual (Wiki)](https://github.com/fdossi/zotfetch/wiki)
+
 **ZotFetch** is a [Zotero 8](https://www.zotero.org/) plugin that automatically downloads PDFs for multiple library items in a single operation. It uses a modular two-stage pipeline — **source resolution** then **PDF extraction** — so that landing pages from publishers, proxies, and repositories are correctly resolved to their actual PDF URL before import.
 
 ---
@@ -45,7 +47,7 @@ cd autoPDFdownloader
 python build.py --clean
 ```
 
-This creates `zotfetch-1.2.0.xpi`. Install it via the steps above.
+This creates `zotfetch-1.4.0.xpi`. Install it via the steps above.
 
 ---
 
@@ -59,7 +61,7 @@ Select one or more items in your Zotero library, then right-click and hover over
 | **Ultra Fast** | Single-pass, fastest mode — open-access sources only. May download fewer PDFs than Batch Download. |
 | **Retry Failed** | Re-attempts only items that failed in the most recent batch |
 | **Retry After Auth** | Opens up to 3 DOI URLs in your browser for manual login/captcha, then retries blocked items |
-| **Preferences** | Shows current configuration values |
+| **Preferences** | Opens the graphical Preferences dialog |
 
 ---
 
@@ -94,9 +96,11 @@ When a source returns a landing page URL (not a direct PDF), ZotFetch tries to f
 
 ## Configuration
 
-View current settings at any time via **ZotFetch ▶ Preferences** in the right-click menu.
+Open the graphical settings dialog via **right-click → ZotFetch ▶ → Preferences**. It covers all options grouped into sections — no need to use `about:config`.
 
-To change settings, edit them directly in **`about:config`** (Zotero's advanced config editor, accessible via **Edit → Settings → Advanced → Config Editor**), filtering by `extensions.zotfetch`.
+Click **? Help** in the dialog to open the [User Manual](https://github.com/fdossi/zotfetch/wiki) with detailed setup instructions for institutional proxy and CAPES.
+
+All preferences are also editable directly in **`about:config`** (Zotero's advanced config editor, **Edit → Settings → Advanced → Config Editor**), filtering by `extensions.zotfetch`.
 
 | Preference key | Default | Description |
 |---|---|---|
@@ -193,7 +197,26 @@ Contributions via pull requests are welcome.
 
 ---
 
+## Disclaimer
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHOR OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY — WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE — ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**The user assumes all risks and sole responsibility for any consequences arising from the use of this plugin.** This includes, but is not limited to, any legal, institutional, or technical consequences related to the access, download, or storage of copyrighted materials. The author makes no representations regarding the legality of any particular use of this plugin in any given jurisdiction. It is the user's responsibility to ensure compliance with all applicable laws, institutional policies, and the terms of service of any platform or content provider accessed through this plugin.
+
+---
+
 ## Changelog
+
+### v1.4.0 — Graphical preferences, captcha protection, UA refresh
+- **New**: Graphical **Preferences dialog** (`Tools → ZotFetch → Preferences` or right-click submenu). All settings configurable in a clean UI — no `about:config` required.
+- **New**: **? Help** button in the Preferences dialog opens the [User Manual wiki](https://github.com/fdossi/zotfetch/wiki).
+- **New**: Cross-item domain cooldown — the first captcha from a publisher during a batch blocks all subsequent items from hitting that same publisher in the same run.
+- **New**: `NativeSourceResolver` and `NativeDoiSourceResolver` now skip known bot-detection publishers (Elsevier, Wiley, Springer, ACS) entirely — preventing Zotero's native UA from triggering captcha floods.
+- **New**: `native-doi` sentinel now checks `negativeCache` and `_localHostAborts` before firing, preventing redundant requests.
+- **Fix**: `ScihubPDFResolver` now correctly returns `failureReason: "cloudflare"` (was `"captcha"`) so the priority tracker uses the correct severity.
+- **Fix**: `OaRepositorySourceResolver` tests corrected to use `itemUrl` identifier key.
+- **Updated**: Browser User-Agent strings refreshed — Chrome 132→135, Edge 132→135, Firefox 135→136, Safari 17→18.
+- **Author**: Updated author from "Fabio" to "Fabio Dossi".
 
 ### v1.3.0 (2026-04-05) — Pipeline refactoring
 - **Breaking internal change**: Discovery and import are now decoupled. `fetchPDF()` is a thin compatibility wrapper; the real work is done by `SourceResolver → PDFResolver → AttachmentImporter`.

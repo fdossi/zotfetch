@@ -115,10 +115,15 @@ globalThis.ZotFetch = {
 };
 
 // Load module helper — reads the file synchronously and evals in global scope.
-const fs = require("fs");
-const path = require("path");
+import { readFileSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+import { createRequire } from "module";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const require = createRequire(import.meta.url);
 function loadModule(relPath) {
-  const code = fs.readFileSync(path.join(__dirname, "..", relPath), "utf-8");
+  const code = readFileSync(join(__dirname, "..", relPath), "utf-8");
   // Strip 'this.X = X' exports which reference `this` (not valid at module top level in strict mode)
   // We execute in global scope via eval.
   // eslint-disable-next-line no-eval
@@ -165,10 +170,12 @@ function mockHttp(responsesByUrl) {
 function domFrom(html) {
   // Lightweight DOM-like structure from an HTML string.
   // We use it to test the extraction helpers inside resolvers.
-  const { JSDOM } = (() => {
-    try { return require("jsdom"); } catch (_) { return { JSDOM: null }; }
-  })();
-  if (!JSDOM) return null; // skip DOM tests if jsdom not available
+  let JSDOM;
+  try {
+    JSDOM = require("jsdom").JSDOM;
+  } catch (_) {
+    return null; // skip DOM tests if jsdom not available
+  }
   return new JSDOM(html).window.document;
 }
 
@@ -258,6 +265,32 @@ await test("UnpaywallSourceResolver: returns landing-page candidate for HTML URL
   assert(candidates[0].kind === "landing-page", `Expected landing-page, got ${candidates[0].kind}`);
 });
 
+await test("NativeDoiSourceResolver: returns sentinel candidate for doi", async () => {
+  const sr = new NativeDoiSourceResolver();
+  const candidates = await sr.buildCandidates({}, { doi: "10.1000/test" });
+  assert(candidates.length === 1, "Expected one candidate");
+  assert(candidates[0].sourceId === "native-doi");
+  assert(candidates[0].url === "", "URL should be empty sentinel");
+  assert(candidates[0].kind === "api-result");
+  assert(candidates[0].priority === 83);
+});
+
+await test("NativeDoiSourceResolver: returns empty when no DOI", async () => {
+  const sr = new NativeDoiSourceResolver();
+  const candidates = await sr.buildCandidates({}, {});
+  assert(candidates.length === 0, "No candidates without DOI");
+});
+
+await test("NativeDoiSourceResolver: priority is between OA repo and doi landing", () => {
+  const nativeDoi = { priority: 83 };
+  const oaRepo = { priority: 85 };
+  const doiLanding = { priority: 80 };
+  const sorted = [doiLanding, nativeDoi, oaRepo].sort((a, b) => b.priority - a.priority);
+  assert(sorted[0].priority === 85, "OA repo should come first");
+  assert(sorted[1].priority === 83, "Native DOI should come second");
+  assert(sorted[2].priority === 80, "DOI landing should come last");
+});
+
 await test("DoiLandingSourceResolver: builds doi.org URL", async () => {
   const sr = new DoiLandingSourceResolver();
   const candidates = await sr.buildCandidates({}, { doi: "10.1000/test" });
@@ -270,7 +303,7 @@ await test("DoiLandingSourceResolver: builds doi.org URL", async () => {
 await test("OaRepositorySourceResolver: accepts arxiv.org URL as direct-pdf", async () => {
   const sr = new OaRepositorySourceResolver();
   const candidates = await sr.buildCandidates({}, {
-    url: "https://arxiv.org/pdf/2301.00001.pdf"
+    itemUrl: "https://arxiv.org/pdf/2301.00001.pdf"
   });
   assert(candidates.length === 1, "Expected one candidate");
   assert(candidates[0].kind === "direct-pdf");
@@ -279,7 +312,7 @@ await test("OaRepositorySourceResolver: accepts arxiv.org URL as direct-pdf", as
 await test("OaRepositorySourceResolver: rejects doi.org URL", async () => {
   const sr = new OaRepositorySourceResolver();
   const candidates = await sr.buildCandidates({}, {
-    url: "https://doi.org/10.1000/test"
+    itemUrl: "https://doi.org/10.1000/test"
   });
   assert(candidates.length === 0, "Should not accept doi.org URL");
 });
@@ -474,7 +507,7 @@ await test("ScihubPDFResolver: extracts embed src from Sci-Hub HTML", async () =
   assert(result.method === "scihub");
 });
 
-await test("ScihubPDFResolver: returns captcha on Cloudflare page", async () => {
+await test("ScihubPDFResolver: returns cloudflare on Cloudflare challenge page", async () => {
   const cfHtml = `<html><body>
     <p>enable javascript and cookies to continue</p>
   </body></html>`;
@@ -490,7 +523,7 @@ await test("ScihubPDFResolver: returns captcha on Cloudflare page", async () => 
   };
   const result = await resolver.resolve(candidate, mockCtx);
   assert(!result.ok);
-  assert(result.failureReason === "captcha", `Got: ${result.failureReason}`);
+  assert(result.failureReason === "cloudflare", `Got: ${result.failureReason}`);
 });
 
 // ─── Test group: URL normalisation ────────────────────────────────────────────

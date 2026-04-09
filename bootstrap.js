@@ -9,7 +9,8 @@ var ZotFetchPlugin = {
   init({ id, version, rootURI }) {
     if (this.initialized) return;
     this.PLUGIN_ID = id;
-    this.rootURI = rootURI;
+    this.version  = version;
+    this.rootURI  = rootURI;
     this.initialized = true;
     Zotero.debug(`ZotFetch ${version} initialized from ${rootURI}`);
   },
@@ -34,7 +35,14 @@ var ZotFetchPlugin = {
       }
 
       await ZotFetchUI.init();
-      ZotFetchUI.addToAllWindows();
+
+      // Only fall back to direct DOM injection when MenuManager did not
+      // register the menu (Zotero version without MenuManager API, or
+      // registration failed).  If MenuManager succeeded, it manages the menu
+      // for all windows automatically — injecting via DOM would duplicate it.
+      if (!ZotFetchUI.menuID) {
+        ZotFetchUI.addToAllWindows();
+      }
 
       Zotero.debug("ZotFetch startup complete");
     } catch (error) {
@@ -63,7 +71,8 @@ var ZotFetchPlugin = {
   },
 
   onMainWindowLoad({ window }) {
-    if (window.ZoteroPane) {
+    // Only inject via DOM when MenuManager is not managing the menu.
+    if (window.ZoteroPane && !ZotFetchUI.menuID) {
       ZotFetchUI.addToWindow(window);
     }
   },

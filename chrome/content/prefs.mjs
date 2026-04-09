@@ -86,40 +86,42 @@ class ZotFetchPrefs {
     Zotero.Prefs.set(PREF_PREFIX + key, value, true);
   }
 
+  /**
+   * Open the graphical ZotFetch preferences dialog.
+   * Reads and writes directly to/from Zotero.Prefs via a bridge object
+   * passed to the XHTML dialog through window.arguments[0].
+   */
+  static openPrefsDialog() {
+    try {
+      const win = Zotero.getMainWindow?.() ?? Zotero.getMainWindows?.()?.[0];
+      if (!win) {
+        Zotero.logError(new Error("[ZotFetch] openPrefsDialog: no main window available"));
+        return;
+      }
+
+      // Bridge object: isolates the dialog from direct Zotero.Prefs access and
+      // lets us pass functions across the chrome window boundary safely.
+      const prefsBridge = {
+        version: ZotFetchPlugin?.version || "",
+        get: (key) => Zotero.Prefs.get(PREF_PREFIX + key, true),
+        set: (key, value) => Zotero.Prefs.set(PREF_PREFIX + key, value, true)
+      };
+
+      const dialogUrl = ZotFetchPlugin.rootURI + "chrome/content/prefs-dialog.xhtml";
+      win.openDialog(
+        dialogUrl,
+        "zotfetch-preferences",
+        "chrome,titlebar,centerscreen,resizable=yes,modal",
+        prefsBridge
+      );
+    } catch (error) {
+      Zotero.logError(error);
+    }
+  }
+
+  // Backward-compatible alias — kept so any external callers still work.
   static openPrefs() {
-    // Show current preference values
-    const prefs = {
-      'Email (Unpaywall)': this.getUnpaywallEmail() || '[Not set]',
-      'CORE API Key': this.getCoreApiKey() ? '[Set]' : '[Not set] - optional, https://core.ac.uk/services/api',
-      'Institutional Proxy URL': this.getInstitutionalProxyUrl() || '[Not set] - e.g., https://proxy.your-institution.edu/login?url=',
-      'Fast Mode': this.isFastModeEnabled() ? 'Enabled' : 'Disabled',
-      'Fast Sci-Hub Mirror Limit': this.getFastMirrorLimit(),
-      'Unpaywall Timeout (ms)': this.getUnpaywallTimeoutMs(),
-      'CrossRef Timeout (ms)': this.getCrossrefTimeoutMs(),
-      'Batch Size': this.getBatchSize(),
-      'Request Delay (ms)': this.getRequestDelayMs(),
-      'Domain Gap (ms)': this.getDomainGapMs(),
-      'Anti-Captcha Mode': this.isAntiCaptchaMode() ? 'Enabled' : 'Disabled',
-      'CAPES Fallback': this.isCapesEnabled() ? 'Enabled' : 'Disabled',
-      'Sci-Hub Fallback': this.isScihubEnabled() ? 'Enabled' : 'Disabled',
-      'CAPES Proxy URL': this.getProxyUrl() || '[Not set]'
-    };
-
-    let msg = 'ZotFetch Preferences:\n\n';
-    for (const [key, value] of Object.entries(prefs)) {
-      msg += `${key}: ${value}\n`;
-    }
-    msg += '\n📍 To edit: Tools → Add-ons → ZotFetch → Preferences (Gear icon)\n';
-    msg += 'Or edit directly in about:config filtering "extensions.ZotFetch-batch"\n';
-    msg += '\n💡 Institutional Proxy: Your institution proxy URL (e.g., proxy.edu/login?url=)\n';
-    msg += 'Used for legal access to paywalled content via your institutional IP.';
-
-    const win = Zotero.getMainWindow?.() || Zotero.getMainWindows?.()[0];
-    if (win && win.Zotero?.alert) {
-      win.Zotero.alert(null, 'ZotFetch Preferences', msg);
-    } else {
-      Zotero.alert(null, 'ZotFetch Preferences', msg);
-    }
+    return this.openPrefsDialog();
   }
 
   static isValidEmail(email) {

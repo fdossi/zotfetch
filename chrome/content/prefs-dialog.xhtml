@@ -1,0 +1,558 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta charset="UTF-8"/>
+<title>ZotFetch – Preferences</title>
+<style type="text/css"><![CDATA[
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root { color-scheme: light dark; }
+body {
+  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 13px;
+  background: Canvas;
+  color: CanvasText;
+  padding: 18px 22px 14px;
+  min-width: 570px;
+  max-width: 680px;
+  overflow-x: hidden;
+}
+h1 {
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid ButtonFace;
+}
+h1 small { font-size: 11px; font-weight: 400; color: GrayText; }
+h2 {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: GrayText;
+  margin-bottom: 10px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid ButtonFace;
+}
+section { margin-bottom: 16px; }
+.field { margin-bottom: 10px; }
+.field > label {
+  display: block;
+  font-weight: 600;
+  font-size: 12.5px;
+  margin-bottom: 4px;
+}
+input[type="text"],
+input[type="email"],
+input[type="number"] {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  border: 1px solid ButtonBorder;
+  border-radius: 4px;
+  background: Field;
+  color: FieldText;
+  outline: none;
+}
+input:focus { outline: 2px solid Highlight; outline-offset: -1px; }
+input:disabled { opacity: 0.4; }
+.hint {
+  font-size: 11px;
+  color: GrayText;
+  margin-top: 4px;
+  line-height: 1.55;
+}
+.hint code, .fbox code {
+  background: ButtonFace;
+  color: CanvasText;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 10.5px;
+  font-family: "Consolas", "Courier New", monospace;
+}
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.row input[type="checkbox"] {
+  width: 14px; height: 14px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.row label { font-size: 13px; cursor: pointer; line-height: 1.4; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }
+details { margin-bottom: 2px; }
+details > summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  color: Highlight;
+  padding: 3px 0;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  user-select: none;
+}
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before {
+  content: "▶";
+  font-size: 8px;
+  display: inline-block;
+  transition: transform 0.12s;
+}
+details[open] > summary::before { transform: rotate(90deg); }
+.section-sep {
+  border: none;
+  border-top: 1px solid ButtonFace;
+  margin: 12px 0 10px;
+}
+.fbox {
+  background: ButtonFace;
+  border-radius: 5px;
+  padding: 9px 12px;
+  margin-top: 6px;
+  font-size: 11.5px;
+  line-height: 1.65;
+}
+.fbox p {
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: GrayText;
+  margin-bottom: 5px;
+}
+.fbox ul { padding-left: 18px; }
+.fbox li { margin-bottom: 2px; }
+.note-info {
+  background: #eaf4fb;
+  color: #1a5276;
+  border-left: 3px solid #3498db;
+  border-radius: 3px;
+  padding: 6px 9px;
+  font-size: 11px;
+  margin-top: 8px;
+  line-height: 1.5;
+}
+@media (prefers-color-scheme: dark) {
+  .note-info { background: #1a2a38; color: #7ec8e3; border-color: #2980b9; }
+}
+.err-msg {
+  display: none;
+  background: #fde8e8;
+  color: #7b241c;
+  border: 1px solid #f1aeb5;
+  border-radius: 4px;
+  padding: 7px 10px;
+  font-size: 12px;
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+@media (prefers-color-scheme: dark) {
+  .err-msg { background: #3a1010; color: #f1948a; border-color: #922b21; }
+}
+.footer {
+  display: flex;
+  align-items: center;
+  padding-top: 12px;
+  border-top: 1px solid ButtonFace;
+  margin-top: 4px;
+  gap: 8px;
+}
+.footer .spacer { flex: 1; }
+button {
+  padding: 6px 18px;
+  font-size: 13px;
+  font-family: inherit;
+  border: 1px solid ButtonBorder;
+  border-radius: 4px;
+  background: ButtonFace;
+  color: ButtonText;
+  cursor: pointer;
+  white-space: nowrap;
+}
+button:hover { filter: brightness(0.92); }
+button.primary {
+  background: Highlight;
+  color: HighlightText;
+  border-color: Highlight;
+  font-weight: 700;
+}
+button.danger { color: #c0392b; }
+]]></style>
+</head>
+<body>
+
+<h1>&#x2699; ZotFetch &#x2013; Preferences <small id="ver"></small></h1>
+
+<div id="errMsg" class="err-msg"></div>
+
+<!-- ── Open Access APIs ───────────────────────────────────────────────── -->
+<section>
+  <h2>Open Access APIs</h2>
+
+  <div class="field">
+    <label for="f-email">Your email address <span style="color:#c0392b">*</span></label>
+    <input type="email" id="f-email" spellcheck="false"
+           placeholder="your@email.com" autocomplete="email"/>
+    <p class="hint">Required by Unpaywall, CrossRef, OpenAlex and Europe PMC polite-pool APIs.
+      Your address is only sent as an API identifier &#x2014; no marketing emails are sent.</p>
+  </div>
+
+  <div class="field">
+    <label for="f-core">CORE Repository API Key
+      <span style="font-weight:400;color:GrayText"> (optional)</span></label>
+    <input type="text" id="f-core" spellcheck="false"
+           placeholder="Leave empty for anonymous access (~10 req/min)"/>
+    <p class="hint">Free key at <strong>core.ac.uk/services/api</strong>
+      &#x2014; raises rate limit to 10,000 req/day and unlocks download URLs.</p>
+  </div>
+</section>
+
+<!-- ── Institutional Access ──────────────────────────────────────────── -->
+<section>
+  <h2>Institutional Access</h2>
+
+  <!-- Institutional proxy -->
+  <div class="field">
+    <label for="f-proxy">University / Institutional Proxy URL</label>
+    <input type="text" id="f-proxy" spellcheck="false"
+           placeholder="https://proxy.sua-universidade.edu.br/login?url="/>
+    <p class="hint">ZotFetch wraps every DOI URL through this address so requests arrive
+      authenticated by your institution&#x2019;s subscription. Works on-campus, via VPN,
+      or with cookie-authenticated EZproxy sessions.
+      Leave empty if your institution is not supported.</p>
+
+    <details>
+      <summary>Supported URL formats &amp; examples</summary>
+      <div class="fbox">
+        <p>EZproxy &#x2014; most common in universities</p>
+        <ul>
+          <li><code>https://proxy.uni.edu/login?url=</code></li>
+          <li><code>https://eresources.uni.edu/login?qurl=</code></li>
+          <li><code>https://proxy.uni.edu/login?qurl={url}</code>
+            (ZotFetch replaces <code>{url}</code> automatically)</li>
+          <li><code>https://proxy.uni.edu</code>
+            (bare base &#x2014; ZotFetch appends <code>/login?url=</code>)</li>
+        </ul>
+        <p style="margin-top:8px">How to find your proxy URL</p>
+        <ul>
+          <li>Search your library website for &#x201C;off-campus access&#x201D;
+            or &#x201C;remote access&#x201D;</li>
+          <li>The URL usually contains words like <code>proxy</code>, <code>login</code>,
+            or <code>ezproxy</code></li>
+          <li>Copy the part up to and including <code>?url=</code> or <code>?qurl=</code></li>
+        </ul>
+      </div>
+    </details>
+  </div>
+
+  <hr class="section-sep"/>
+
+  <!-- CAPES -->
+  <div class="row">
+    <input type="checkbox" id="f-capes-on"/>
+    <label for="f-capes-on">
+      <strong>Enable CAPES Portal</strong>
+      &#x2014; Brazilian federal universities (peri&#xF3;dicos.capes.gov.br)
+    </label>
+  </div>
+
+  <div id="capes-block" class="field">
+    <label for="f-capes-url">CAPES Gateway URL</label>
+    <input type="text" id="f-capes-url" spellcheck="false"
+           placeholder="https://capes.ez.no/login?url="/>
+    <p class="hint">
+      The authenticated CAPES gateway URL provided by your institution&#x2019;s library.
+      Leave empty to hit <code>doi.org</code> directly
+      (works only from a CAPES-connected network or active browser session).
+    </p>
+
+    <details>
+      <summary>Common CAPES gateway URLs</summary>
+      <div class="fbox">
+        <p>CAFe / CAPES Peri&#xF3;dicos &#x2014; ask your library which one applies</p>
+        <ul>
+          <li><code>https://capes.ez.no/login?url=</code>
+            &#x2014; generic CAFe federated login</li>
+          <li><code>https://www-periodicos-capes-gov-br.ez29.capes.gov.br/index.php?option=com_pemetabusca&amp;mn=not&amp;smn=not&amp;base=find-in-lots-of-places&amp;type=e&amp;Itemid=141&amp;url=</code></li>
+          <li>Your institution may also provide a personalised EZproxy URL
+            that already routes through CAPES &#x2014; use <em>Institutional Proxy</em> above
+            in that case</li>
+        </ul>
+      </div>
+    </details>
+
+    <div class="note-info">
+      &#x2139; CAPES only runs in <strong>Batch Download</strong> (2nd pass / fallback)
+      and <strong>Retry Failed</strong> &#x2014; not in Ultra Fast mode.
+    </div>
+  </div>
+</section>
+
+<!-- ── Download Behaviour ─────────────────────────────────────────────── -->
+<section>
+  <h2>Download Behaviour</h2>
+
+  <div class="row">
+    <input type="checkbox" id="f-fast"/>
+    <label for="f-fast">
+      <strong>Fast Mode</strong> &#x2014; 2-pass strategy:
+      OA sources first; Sci-Hub only on the fallback pass (recommended)
+    </label>
+  </div>
+
+  <div class="row">
+    <input type="checkbox" id="f-scihub"/>
+    <label for="f-scihub">
+      Enable <strong>Sci-Hub</strong> fallback
+      <span style="color:GrayText;font-weight:400"> &#x2014; use only where permitted by local law</span>
+    </label>
+  </div>
+
+  <div class="grid2" style="margin-top:10px">
+    <div class="field">
+      <label for="f-mirrors">Sci-Hub mirrors (Ultra-Fast mode)</label>
+      <input type="number" id="f-mirrors" min="1" max="10" step="1"/>
+      <p class="hint">Fewer = faster, more = higher success rate</p>
+    </div>
+    <div class="field">
+      <label for="f-batch">Batch size (max items per run)</label>
+      <input type="number" id="f-batch" min="1" max="500" step="1"/>
+      <p class="hint">Items processed per Batch Download click</p>
+    </div>
+    <div class="field" style="margin-top:4px">
+      <label for="f-delay">Delay between items (ms)</label>
+      <input type="number" id="f-delay" min="0" max="30000" step="100"/>
+      <p class="hint">&#x2265; 900 ms recommended to stay under rate limits</p>
+    </div>
+    <div class="field" style="margin-top:4px">
+      <label for="f-gap">Minimum gap between API calls (ms)</label>
+      <input type="number" id="f-gap" min="0" max="30000" step="100"/>
+      <p class="hint">Pause between successive requests to the same domain</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── Advanced (collapsible) ─────────────────────────────────────────── -->
+<details>
+  <summary>Advanced Settings</summary>
+
+  <div class="row" style="margin-top:8px">
+    <input type="checkbox" id="f-anticaptcha"/>
+    <label for="f-anticaptcha">
+      <strong>Anti-Captcha Mode</strong>
+      &#x2014; adds human-like random delays on challenge-protected publishers
+    </label>
+  </div>
+
+  <div class="grid2" style="margin-top:10px">
+    <div class="field">
+      <label for="f-timeout">Request timeout (ms)</label>
+      <input type="number" id="f-timeout" min="5000" max="120000" step="1000"/>
+    </div>
+    <div class="field">
+      <label for="f-uptimeout">Unpaywall timeout (ms)</label>
+      <input type="number" id="f-uptimeout" min="5000" max="60000" step="1000"/>
+    </div>
+    <div class="field">
+      <label for="f-crtimeout">CrossRef timeout (ms)</label>
+      <input type="number" id="f-crtimeout" min="5000" max="60000" step="1000"/>
+    </div>
+  </div>
+</details>
+
+<!-- ── Footer buttons ─────────────────────────────────────────────────── -->
+<div class="footer">
+  <button type="button" onclick="openHelp()" title="Open the ZotFetch user manual in your browser">&#x2753; Help</button>
+  <button class="danger" type="button" onclick="resetDefaults()">Reset Defaults</button>
+  <span class="spacer"></span>
+  <button type="button" onclick="window.close()">Cancel</button>
+  <button class="primary" type="button" onclick="saveAndClose()">Save</button>
+</div>
+
+<script type="application/javascript"><![CDATA[
+"use strict";
+
+// Preferences bridge passed by the opener via window.arguments[0].
+const P = (window.arguments && window.arguments[0]) || null;
+
+const DEFAULTS = {
+  unpaywallEmail:        "",
+  coreApiKey:            "",
+  institutionalProxyUrl: "",
+  enableCapesFallback:   true,
+  proxyUrl:              "",
+  fastMode:              true,
+  enableScihubFallback:  true,
+  fastMirrorLimit:       2,
+  batchSize:             30,
+  requestDelayMs:        900,
+  domainGapMs:           1500,
+  antiCaptchaMode:       true,
+  requestTimeoutMs:      15000,
+  unpaywallTimeoutMs:    12000,
+  crossrefTimeoutMs:     10000
+};
+
+function g(id)    { return document.getElementById(id); }
+function pget(k)  { return P ? P.get(k) : DEFAULTS[k]; }
+function pset(k,v){ if (P) P.set(k, v); }
+
+// ── Load current values ─────────────────────────────────────────────────
+function load() {
+  if (P && P.version) g("ver").textContent = "v" + P.version;
+
+  g("f-email").value         = pget("unpaywallEmail")        || "";
+  g("f-core").value          = pget("coreApiKey")            || "";
+  g("f-proxy").value         = pget("institutionalProxyUrl") || "";
+  g("f-capes-on").checked    = pget("enableCapesFallback") !== false;
+  g("f-capes-url").value     = pget("proxyUrl")              || "";
+  g("f-fast").checked        = pget("fastMode")              !== false;
+  g("f-scihub").checked      = pget("enableScihubFallback")  !== false;
+  g("f-mirrors").value       = pget("fastMirrorLimit")       ?? 2;
+  g("f-batch").value         = pget("batchSize")             ?? 30;
+  g("f-delay").value         = pget("requestDelayMs")        ?? 900;
+  g("f-gap").value           = pget("domainGapMs")           ?? 1500;
+  g("f-anticaptcha").checked = pget("antiCaptchaMode")       !== false;
+  g("f-timeout").value       = pget("requestTimeoutMs")      ?? 15000;
+  g("f-uptimeout").value     = pget("unpaywallTimeoutMs")    ?? 12000;
+  g("f-crtimeout").value     = pget("crossrefTimeoutMs")     ?? 10000;
+
+  syncCapes();
+}
+
+// ── CAPES section gating ────────────────────────────────────────────────
+function syncCapes() {
+  var on = g("f-capes-on").checked;
+  g("capes-block").style.opacity = on ? "1" : "0.4";
+  g("f-capes-url").disabled      = !on;
+}
+g("f-capes-on").addEventListener("change", syncCapes);
+
+// ── Validation ──────────────────────────────────────────────────────────
+function showError(msg) {
+  var el = g("errMsg");
+  el.textContent = "\u26A0 " + msg;
+  el.style.display = "block";
+  el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+function clearError() {
+  var el = g("errMsg");
+  el.style.display = "none";
+  el.textContent = "";
+}
+
+function validate() {
+  var email = g("f-email").value.trim();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    g("f-email").focus();
+    showError("Please enter a valid email address, or leave it empty to use the built-in fallback.");
+    return false;
+  }
+  var numRules = [
+    ["f-mirrors",  "Sci-Hub mirror limit",   1,    10],
+    ["f-batch",    "Batch size",             1,   500],
+    ["f-delay",    "Delay between items",    0, 30000],
+    ["f-gap",      "Domain gap",             0, 30000],
+    ["f-timeout",  "Request timeout",     5000, 120000],
+    ["f-uptimeout","Unpaywall timeout",   5000,  60000],
+    ["f-crtimeout","CrossRef timeout",    5000,  60000]
+  ];
+  for (var i = 0; i < numRules.length; i++) {
+    var rule  = numRules[i];
+    var val   = parseInt(g(rule[0]).value, 10);
+    if (isNaN(val) || val < rule[2] || val > rule[3]) {
+      g(rule[0]).focus();
+      showError(rule[1] + " must be a number between " + rule[2] + " and " + rule[3] + ".");
+      return false;
+    }
+  }
+  return true;
+}
+
+// ── Save ────────────────────────────────────────────────────────────────
+function saveAndClose() {
+  clearError();
+  if (!validate()) return;
+
+  pset("unpaywallEmail",        g("f-email").value.trim());
+  pset("coreApiKey",            g("f-core").value.trim());
+  pset("institutionalProxyUrl", g("f-proxy").value.trim());
+  pset("enableCapesFallback",   g("f-capes-on").checked);
+  pset("proxyUrl",              g("f-capes-url").value.trim());
+  pset("fastMode",              g("f-fast").checked);
+  pset("enableScihubFallback",  g("f-scihub").checked);
+  pset("fastMirrorLimit",       parseInt(g("f-mirrors").value,   10));
+  pset("batchSize",             parseInt(g("f-batch").value,     10));
+  pset("requestDelayMs",        parseInt(g("f-delay").value,     10));
+  pset("domainGapMs",           parseInt(g("f-gap").value,       10));
+  pset("antiCaptchaMode",       g("f-anticaptcha").checked);
+  pset("requestTimeoutMs",      parseInt(g("f-timeout").value,   10));
+  pset("unpaywallTimeoutMs",    parseInt(g("f-uptimeout").value,  10));
+  pset("crossrefTimeoutMs",     parseInt(g("f-crtimeout").value,  10));
+
+  window.close();
+}
+
+// ── Reset Defaults ──────────────────────────────────────────────────────
+function resetDefaults() {
+  if (!window.confirm("Reset all ZotFetch settings to their default values?\nThis cannot be undone.")) return;
+  g("f-email").value         = DEFAULTS.unpaywallEmail;
+  g("f-core").value          = DEFAULTS.coreApiKey;
+  g("f-proxy").value         = DEFAULTS.institutionalProxyUrl;
+  g("f-capes-on").checked    = DEFAULTS.enableCapesFallback;
+  g("f-capes-url").value     = DEFAULTS.proxyUrl;
+  g("f-fast").checked        = DEFAULTS.fastMode;
+  g("f-scihub").checked      = DEFAULTS.enableScihubFallback;
+  g("f-mirrors").value       = DEFAULTS.fastMirrorLimit;
+  g("f-batch").value         = DEFAULTS.batchSize;
+  g("f-delay").value         = DEFAULTS.requestDelayMs;
+  g("f-gap").value           = DEFAULTS.domainGapMs;
+  g("f-anticaptcha").checked = DEFAULTS.antiCaptchaMode;
+  g("f-timeout").value       = DEFAULTS.requestTimeoutMs;
+  g("f-uptimeout").value     = DEFAULTS.unpaywallTimeoutMs;
+  g("f-crtimeout").value     = DEFAULTS.crossrefTimeoutMs;
+  syncCapes();
+  clearError();
+}
+
+// ── Keyboard shortcuts ──────────────────────────────────────────────────
+window.addEventListener("DOMContentLoaded", load);
+window.addEventListener("keydown", function(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); saveAndClose(); }
+  if (e.key === "Escape") window.close();
+});
+// ── Help ────────────────────────────────────────────────────────────────────
+function openHelp() {
+  var url = "https://github.com/fdossi/zotfetch/wiki";
+  try {
+    // Zotero 8 cross-platform launcher
+    if (typeof Zotero !== "undefined" && Zotero.launchURL) {
+      Zotero.launchURL(url);
+    } else {
+      // Fallback: use the opener chrome window's launchURL
+      var win = window.opener ||
+        (window.arguments && window.arguments[0] && window.arguments[0]._chromeWin);
+      if (win && win.Zotero && win.Zotero.launchURL) {
+        win.Zotero.launchURL(url);
+      } else {
+        window.open(url, "_blank");
+      }
+    }
+  } catch(e) {
+    window.open(url, "_blank");
+  }
+}]]></script>
+
+</body>
+</html>

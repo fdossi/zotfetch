@@ -3,36 +3,36 @@
 
 const BROWSER_FINGERPRINTS = [
   {
-    // Chrome 132 / Windows
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
-    secChUa: '"Chromium";v="132", "Google Chrome";v="132", "Not-A.Brand";v="99"',
+    // Chrome 135 / Windows
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+    secChUa: '"Chromium";v="135", "Google Chrome";v="135", "Not-A.Brand";v="99"',
     secChUaMobile: "?0",
     secChUaPlatform: '"Windows"'
   },
   {
-    // Edge 132 / Windows
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 Edg/132.0.0.0",
-    secChUa: '"Chromium";v="132", "Microsoft Edge";v="132", "Not-A.Brand";v="99"',
+    // Edge 135 / Windows
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0",
+    secChUa: '"Chromium";v="135", "Microsoft Edge";v="135", "Not-A.Brand";v="99"',
     secChUaMobile: "?0",
     secChUaPlatform: '"Windows"'
   },
   {
-    // Chrome 132 / macOS
-    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
-    secChUa: '"Chromium";v="132", "Google Chrome";v="132", "Not-A.Brand";v="99"',
+    // Chrome 135 / macOS
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+    secChUa: '"Chromium";v="135", "Google Chrome";v="135", "Not-A.Brand";v="99"',
     secChUaMobile: "?0",
     secChUaPlatform: '"macOS"'
   },
   {
-    // Firefox 135 / Windows — does not send Client Hints
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0",
+    // Firefox 136 / Windows — does not send Client Hints
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0",
     secChUa: null,
     secChUaMobile: null,
     secChUaPlatform: null
   },
   {
-    // Safari 17 / macOS — does not send Client Hints
-    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15",
+    // Safari 18 / macOS — does not send Client Hints
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
     secChUa: null,
     secChUaMobile: null,
     secChUaPlatform: null

@@ -13,4 +13,3 @@ pref("extensions.zotfetch.requestTimeoutMs", 15000);
 pref("extensions.zotfetch.proxyUrl", "");
 pref("extensions.zotfetch.institutionalProxyUrl", "");
 pref("extensions.zotfetch.coreApiKey", "");
-

@@ -25,18 +25,16 @@ function _looksLikePdf(url) {
 // Only well-known prefixes that correspond to protected publishers are listed.
 // ─────────────────────────────────────────────────────────────────────────────
 const _DOI_PREFIX_TO_HOST = {
-  "10.1016": "sciencedirect.com",   // Elsevier flagship journals
-  "10.1006": "sciencedirect.com",   // Old Elsevier prefix (Academic Press)
-  "10.1053": "sciencedirect.com",   // Elsevier clinical journals
-  "10.1016": "sciencedirect.com",   // repeated for clarity
+  "10.1016": "sciencedirect.com",        // Elsevier flagship journals
+  "10.1006": "sciencedirect.com",        // Old Elsevier prefix (Academic Press)
+  "10.1053": "sciencedirect.com",        // Elsevier clinical journals
   "10.1002": "onlinelibrary.wiley.com",
   "10.1111": "onlinelibrary.wiley.com",  // Wiley-Blackwell
   "10.1007": "link.springer.com",
-  "10.1007": "link.springer.com",
-  "10.1021": "pubs.acs.org",         // ACS Publications
-  "10.1039": "pubs.rsc.org",         // Royal Society of Chemistry
-  "10.1177": "journals.sagepub.com", // SAGE
-  "10.1080": "tandfonline.com"       // Taylor & Francis
+  "10.1021": "pubs.acs.org",             // ACS Publications
+  "10.1039": "pubs.rsc.org",             // Royal Society of Chemistry
+  "10.1177": "journals.sagepub.com",     // SAGE
+  "10.1080": "tandfonline.com"           // Taylor & Francis
 };
 
 /**
@@ -64,7 +62,19 @@ var NativeSourceResolver = class {
 
   enabled() { return true; }
 
-  async buildCandidates(_item, _ids) {
+  async buildCandidates(_item, ids) {
+    // Skip for publishers whose bot-detection immediately blocks Zotero's real
+    // UA (reported as "Zotero/8.x" in captcha screens). Zotero's internal OA
+    // finder uses that UA and cannot be overridden. Any truly OA copy will be
+    // found by ZotFetch's own Unpaywall/S2/OpenAlex pipeline with spoofed
+    // browser headers, without triggering a publisher captcha.
+    if (ids.doi) {
+      const pubHost = _publisherHostFromDoi(ids.doi);
+      if (pubHost && ProtectedHosts.getHostPolicy(pubHost)?.earlyAbortOnChallenge) {
+        Zotero.debug(`[ZotFetch] NativeSourceResolver: skip ${pubHost} (bot-detection publisher)`);
+        return [];
+      }
+    }
     return [{
       sourceId: "native",
       label: "Zotero Native",
@@ -192,7 +202,7 @@ var OpenAlexSourceResolver = class {
 
     try {
       const email = ZotFetchPrefs.getUnpaywallEmail();
-      const url = `https://api.openalex.org/works/https://doi.org/${encodeURIComponent(ids.doi)}?select=open_access,best_oa_location&mailto=${encodeURIComponent(email)}`;
+      const url = `https://api.openalex.org/works/https://doi.org/${encodeURI(ids.doi)}?select=open_access,best_oa_location&mailto=${encodeURIComponent(email)}`;
       const resp = await Zotero.HTTP.request("GET", url, {
         responseType: "json",
         timeout: 10000
@@ -453,9 +463,52 @@ var OaRepositorySourceResolver = class {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// NativeDoiSourceResolver
+// Delegates DOI-based PDF resolution to Zotero's built-in machinery.
+// Zotero uses its translator library — the same engine the Zotero Connector
+// uses when you click it on a publisher page — together with any proxy rules
+// configured in Tools → Preferences → Proxies.
+//
+// When the user is on an institutional IP/VPN, all HTTP requests from Zotero
+// originate from that authenticated network, so publisher servers serve PDFs
+// directly, exactly like the Connector does from a browser on the same network.
+//
+// Placed above our custom DoiLandingSourceResolver (priority 80): Zotero's
+// translator library covers more publishers than our hand-written HTML
+// heuristics.  If Zotero 8 does not recognise the "doi" method the call
+// returns false silently and the pipeline continues to DoiLanding.
+// ─────────────────────────────────────────────────────────────────────────────
+var NativeDoiSourceResolver = class {
+  constructor() { this.id = "native-doi"; }
+
+  enabled() { return true; }
+
+  async buildCandidates(_item, ids) {
+    if (!ids.doi) return [];
+    // Skip for bot-detection publishers: native-doi always follows doi.org →
+    // publisher page with Zotero's real UA, reliably triggering captcha.
+    // DoiLandingSourceResolver serves the same path with spoofed browser headers
+    // and is protected by attempt limiting and the negative cache.
+    const pubHost = _publisherHostFromDoi(ids.doi);
+    if (pubHost && ProtectedHosts.getHostPolicy(pubHost)?.earlyAbortOnChallenge) {
+      Zotero.debug(`[ZotFetch] NativeDoiSourceResolver: skip ${pubHost} (bot-detection publisher)`);
+      return [];
+    }
+    return [{
+      sourceId: "native-doi",
+      label: "Zotero Native (DOI)",
+      url: "",          // empty URL — handled as a sentinel in processItem
+      kind: "api-result",
+      priority: 83     // below OA repo (85); above custom DOI landing (80)
+    }];
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // DoiLandingSourceResolver
 // Follows the canonical DOI resolver, which redirects to the publisher page.
 // We mark it as a landing-page so HtmlLandingPDFResolver will extract the PDF.
+// Fallback for publishers not covered by Zotero's native translator library.
 // ─────────────────────────────────────────────────────────────────────────────
 var DoiLandingSourceResolver = class {
   constructor() { this.id = "doi-landing"; }
@@ -473,7 +526,7 @@ var DoiLandingSourceResolver = class {
     return [{
       sourceId: "doi-landing",
       label: "DOI Landing",
-      url: `https://doi.org/${encodeURIComponent(ids.doi)}`,
+      url: `https://doi.org/${encodeURI(ids.doi)}`,
       kind: "landing-page",
       priority: 80,
       headers: { Referer: "https://doi.org/" },
@@ -498,7 +551,7 @@ var InstitutionalProxySourceResolver = class {
     const proxyBase = ZotFetchPrefs.getInstitutionalProxyUrl();
     if (!proxyBase || !proxyBase.trim()) return [];
 
-    const doiTarget = `https://doi.org/${encodeURIComponent(ids.doi)}`;
+    const doiTarget = `https://doi.org/${encodeURI(ids.doi)}`;
     const proxied = ZotFetch.buildProxyTargetURL(proxyBase, doiTarget);
 
     const candidates = [{
@@ -516,8 +569,9 @@ var InstitutionalProxySourceResolver = class {
     // Secondary: route Semantic Scholar's PDF URL through the proxy as well
     // so authenticated users can download from S2 PDFs behind the proxy.
     // We add it as a lower-priority variant.
-    const s2Domain = "pdfs.semanticscholar.org";
-    if (!ZotFetch.cooldown.isDomainCoolingDown(s2Domain)) {
+    const s2ApiDomain = "api.semanticscholar.org";
+    if (!ZotFetch.cooldown.isDomainCoolingDown(s2ApiDomain)) {
+      await ZotFetch.cooldown.honorDomainGap(s2ApiDomain, ZotFetchPrefs);
       try {
         const email = ZotFetchPrefs.getUnpaywallEmail();
         const s2url = `https://api.semanticscholar.org/graph/v1/paper/DOI:${encodeURIComponent(ids.doi)}?fields=openAccessPdf`;
@@ -561,7 +615,7 @@ var CapesSourceResolver = class {
     if (!ids.doi) return [];
 
     const proxy = ZotFetchPrefs.getProxyUrl();
-    const doiTarget = `https://doi.org/${encodeURIComponent(ids.doi)}`;
+    const doiTarget = `https://doi.org/${encodeURI(ids.doi)}`;
     const url = proxy ? ZotFetch.buildProxyTargetURL(proxy, doiTarget) : doiTarget;
 
     return [{
@@ -629,6 +683,9 @@ var ScihubSourceResolver = class {
   }
 };
 
+// Expose the DOI-prefix → publisher-host helper so fetch.mjs can apply the
+// same protected-host checks inside the native/native-doi sentinel handlers.
+this.ZotFetchPublisherHostFromDoi = _publisherHostFromDoi;
 this.NativeSourceResolver = NativeSourceResolver;
 this.UnpaywallSourceResolver = UnpaywallSourceResolver;
 this.SemanticScholarSourceResolver = SemanticScholarSourceResolver;
@@ -636,6 +693,7 @@ this.OpenAlexSourceResolver = OpenAlexSourceResolver;
 this.CoreSourceResolver = CoreSourceResolver;
 this.EuropePmcSourceResolver = EuropePmcSourceResolver;
 this.OaRepositorySourceResolver = OaRepositorySourceResolver;
+this.NativeDoiSourceResolver = NativeDoiSourceResolver;
 this.DoiLandingSourceResolver = DoiLandingSourceResolver;
 this.InstitutionalProxySourceResolver = InstitutionalProxySourceResolver;
 this.CapesSourceResolver = CapesSourceResolver;

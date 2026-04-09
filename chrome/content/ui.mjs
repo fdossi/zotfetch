@@ -71,7 +71,7 @@ class ZotFetchUI {
                   label: "Preferences",
                   onCommand: () => {
                     if (typeof ZotFetchPrefs !== 'undefined') {
-                      ZotFetchPrefs.openPrefs();
+                      ZotFetchPrefs.openPrefsDialog();
                     }
                   }
                 }
@@ -167,7 +167,7 @@ class ZotFetchUI {
     configItem.setAttribute("label", "Preferences");
     configItem.addEventListener("command", () => {
       if (typeof ZotFetchPrefs !== 'undefined') {
-        ZotFetchPrefs.openPrefs();
+        ZotFetchPrefs.openPrefsDialog();
       }
     });
     subpopup.appendChild(configItem);

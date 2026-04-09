@@ -8,17 +8,22 @@
 //    └─ SourceResolver[].buildCandidates()   — produce SourceCandidates per route
 //    └─ sort by priority
 //    └─ for each candidate:
-//         PDFResolver[].resolve()            — HEAD/GET → real PDF URL
-//           ├─ DirectPDFResolver             — kind=direct-pdf
-//           ├─ PublisherPatternResolver      — landing-page, known hosts
-//           ├─ HtmlLandingPDFResolver        — landing-page, generic extraction
-//           └─ ScihubPDFResolver             — landing-page, Sci-Hub embed
+//         Sentinel handlers (api-result, kind):
+//           • sourceId="native"      → tryNative()     (Zotero OA finder)
+//           • sourceId="native-doi" → tryNativeDoi()  (Zotero Connector-like:
+//                                       translator library + Zotero proxy rules)
+//         PDFResolver[].resolve()   — HEAD/GET → real PDF URL
+//           ├─ DirectPDFResolver            — kind=direct-pdf
+//           ├─ PublisherPatternResolver     — landing-page, known hosts
+//           ├─ HtmlLandingPDFResolver       — landing-page, generic extraction
+//           └─ ScihubPDFResolver            — landing-page, Sci-Hub embed
 //         AttachmentImporter.importResolvedPdf()
 //
 // Adding a new source: implement SourceResolver and add it to _buildSourceResolvers().
 // Adding a new PDF extractor: implement PDFResolver and add it to _buildPdfResolvers().
 
-const NATIVE_METHODS = ["oa"];
+const NATIVE_METHODS     = ["oa"];   // Zotero's built-in OA resolver (Unpaywall etc.)
+const NATIVE_DOI_METHODS = ["doi"];  // Zotero's translator-based DOI resolver (Connector-like)
 const SAFE_OA_HOSTS = new Set([
   "arxiv.org", "ar5iv.labs.arxiv.org",
   "europepmc.org", "ncbi.nlm.nih.gov", "pmc.ncbi.nlm.nih.gov",
@@ -251,13 +256,54 @@ class ZotFetch {
 
     // 3. Try each candidate through the PDF resolver chain.
     for (const candidate of allCandidates) {
-      // Native sentinel — delegate to Zotero's OA finder directly.
+      // Native OA sentinel — delegate to Zotero's OA finder directly.
       if (candidate.sourceId === "native") {
+        // Defence-in-depth for DOI prefixes not covered by the buildCandidates
+        // filter: if a previous batch run already proved this (doi, publisher)
+        // is bot-blocked, skip rather than let Zotero's real UA re-trigger it.
+        if (ids.doi) {
+          const _ph = ZotFetchPublisherHostFromDoi(ids.doi);
+          if (_ph && ProtectedHosts.getHostPolicy(_ph)?.earlyAbortOnChallenge &&
+              ZotFetch.negativeCache.has(ids.doi, _ph)) {
+            Zotero.debug(`[ZotFetch] skip native (${_ph} in neg-cache)`);
+            continue;
+          }
+        }
         if (await this.tryNative(item)) {
           stats.downloaded++;
           stats.native++;
           Zotero.debug(`[ZotFetch] ✓ native (item ${item.id})`);
           return "native";
+        }
+        continue;
+      }
+
+      // Native DOI sentinel — delegate to Zotero's translator-based DOI
+      // resolution, mirroring what the Zotero Connector does when clicked on a
+      // publisher page.  Uses Zotero's configured proxy rules so it works for
+      // users on institutional IP/VPN and for users with EZproxy configured in
+      // Zotero → Preferences → Proxies.
+      if (candidate.sourceId === "native-doi") {
+        // The sentinel early-exit bypasses the negativeCache and localHostAborts
+        // checks below. Apply them explicitly so that when an earlier pipeline
+        // candidate (e.g. Unpaywall → sciencedirect.com) already detected a
+        // challenge, native-doi doesn't fire a second Zotero-UA captcha for the
+        // same paper. Cross-batch protection via negativeCache handles retries.
+        if (ids.doi) {
+          const _ph = ZotFetchPublisherHostFromDoi(ids.doi);
+          if (_ph && ProtectedHosts.getHostPolicy(_ph)?.earlyAbortOnChallenge) {
+            if (_localHostAborts.has(_ph) ||
+                ZotFetch.negativeCache.has(ids.doi, _ph)) {
+              Zotero.debug(`[ZotFetch] skip native-doi (${_ph} blocked)`);
+              continue;
+            }
+          }
+        }
+        if (await this.tryNativeDoi(item)) {
+          stats.downloaded++;
+          stats.native++;
+          Zotero.debug(`[ZotFetch] ✓ native-doi (item ${item.id})`);
+          return "native-doi";
         }
         continue;
       }
@@ -275,6 +321,20 @@ class ZotFetch {
         Zotero.debug(
           `[ZotFetch][NegCache] SKIP ${candidate.sourceId} (${effectiveHost}) ` +
           `reason=${nc?.reason} doi=${ids.doi} item=${item.id}`
+        );
+        continue;
+      }
+
+      // ── Cross-item domain cooldown ──────────────────────────────────────────
+      // After the first captcha/challenge from a protected publisher a penalty
+      // cooldown is applied to its domain (see earlyAbortOnChallenge handler
+      // below). Checking it here prevents every subsequent item in the same
+      // batch from generating its own captcha against the same publisher:
+      // one strike flips the switch for the rest of the batch.
+      if (hostPolicy && ZotFetch.cooldown.isDomainCoolingDown(effectiveHost)) {
+        Zotero.debug(
+          `[ZotFetch][Cooldown] SKIP ${candidate.sourceId} (${effectiveHost}) — ` +
+          `domain cooling down, doi=${ids.doi || "?"} item=${item.id}`
         );
         continue;
       }
@@ -388,7 +448,8 @@ class ZotFetch {
       new EuropePmcSourceResolver(),
       new CoreSourceResolver(),
       new OaRepositorySourceResolver(),
-      new DoiLandingSourceResolver(),
+      new NativeDoiSourceResolver(),    // Zotero Connector-like: translator + proxy
+      new DoiLandingSourceResolver(),   // fallback HTML extraction
       new InstitutionalProxySourceResolver()
     ];
     if (mode === "fast")     return fast;
@@ -436,6 +497,31 @@ class ZotFetch {
   static async tryNative(item) {
     if (!Zotero.Attachments.canFindFileForItem(item)) return false;
     await Zotero.Attachments.addAvailableFile(item, { methods: NATIVE_METHODS });
+    return this.hasPDF(item);
+  }
+
+  // ── Zotero Connector-like DOI resolver ───────────────────────────────────
+  // Delegates to Zotero's built-in DOI-based PDF resolution ("doi" method).
+  // Internally uses the translator library + Zotero proxy configuration, the
+  // same mechanism the Zotero Connector uses when you click it on a publisher
+  // landing page.
+  //
+  // Institutional IP / VPN: all HTTP requests from Zotero go out via the
+  //   authenticated network → publisher serves the PDF directly.
+  // Configured Zotero proxy: requests are rewritten to route through the
+  //   proxy URL set in Tools → Preferences → Proxies.
+  //
+  // If Zotero 8 does not support the "doi" method the call returns false
+  // harmlessly and the pipeline falls through to DoiLandingSourceResolver.
+
+  static async tryNativeDoi(item) {
+    const doi = Utils.normalizeDOI(item.getField("DOI") || "");
+    if (!doi) return false;
+    try {
+      await Zotero.Attachments.addAvailableFile(item, { methods: NATIVE_DOI_METHODS });
+    } catch (err) {
+      Zotero.debug(`[ZotFetch] tryNativeDoi: ${err?.message || err}`);
+    }
     return this.hasPDF(item);
   }
 
