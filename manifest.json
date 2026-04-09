@@ -4,6 +4,9 @@
   "version": "1.4.0",
   "author": "Fabio Dossi",
   "description": "ZotFetch: Batch PDF downloader for Zotero 8. Multi-source pipeline with HTML-to-PDF extraction, Unpaywall, Semantic Scholar, OpenAlex, institutional proxy, and CAPES fallback.",
+  "icons": {
+    "48": "chrome/content/icon48.png"
+  },
   "applications": {
     "zotero": {
       "id": "zotfetch@edslab.research",

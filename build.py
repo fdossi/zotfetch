@@ -59,6 +59,7 @@ def create_xpi(with_latest=False, clean=False):
         'chrome/content/fetch.mjs',
         'chrome/content/ui.mjs',
         'chrome/content/prefs-dialog.xhtml',
+        'chrome/content/icon48.png',
         'locale/en-US/zotfetch.ftl'
     ]
     version = get_version_from_manifest()
