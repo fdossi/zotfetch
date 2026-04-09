@@ -54,7 +54,7 @@ Access all commands via **right-click → ZotFetch ▶**:
 | Command | What it does |
 |---|---|
 | **Batch Download** | Main command. Tries all OA sources first, then institutional proxy and CAPES as fallback (when Fast Mode is on). |
-| **Ultra Fast** | Single-pass, maximum speed. Uses open-access sources + up to 2 Sci-Hub mirrors. Skips CAPES fallback. |
+| **Ultra Fast** | Single-pass, maximum speed. Uses open-access sources only. Skips CAPES fallback. |
 | **Retry Failed** | Re-processes only items that failed in the most recent batch. |
 | **Retry After Auth** | Opens the DOI URLs of blocked/captcha items in your browser so you can authenticate, then retries those items. |
 | **Preferences** | Opens the graphical settings dialog where you configure proxy, CAPES, email, and other options. |
@@ -78,7 +78,7 @@ Everything runs in a single pass. CAPES is skipped. Best for quick sweeps of lar
 
 ### Full Mode
 
-Runs when Fast Mode is disabled, or during **Retry Failed**. All sources run in a single comprehensive pass with no deferral. CAPES and Sci-Hub are both active.
+Runs when Fast Mode is disabled, or during **Retry Failed**. All sources run in a single comprehensive pass with no deferral — CAPES is included.
 
 ---
 
@@ -264,4 +264,4 @@ CAPES only runs in the 2nd pass (Fast Mode) or during Retry. Run **Retry Failed*
 ZotFetch automatically looks up missing DOIs via CrossRef using the title and author. If this fails (title too generic or not in CrossRef), add the DOI manually to the item's DOI field.
 
 **Ultra Fast completed but many items missing**  
-Expected — Ultra Fast skips CAPES and uses fewer Sci-Hub mirrors. Follow up with **Batch Download** or **Retry Failed** in standard Fast Mode.
+Expected — Ultra Fast skips CAPES. Follow up with **Batch Download** or **Retry Failed** in standard Fast Mode.
