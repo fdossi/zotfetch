@@ -52,6 +52,13 @@ class ZotFetch {
   // Cleared at the start of every runBatch() call.
   static _batchAttemptTracker = new ProtectedHosts.ItemHostAttemptTracker();
 
+  // Per-batch set of publisher hosts where tryNativeDoi has already failed.
+  // After one failure (off-campus, no auth) subsequent items skip native-doi
+  // for that same publisher instead of each making a wasted request.
+  // On VPN, tryNativeDoi succeeds immediately so this set stays empty and all
+  // items benefit from institutional access.
+  static _nativeDoiFailedHosts = new Set();
+
   static async runUltraFastBatch() {
     return this.runBatch({ ultraFast: true });
   }
@@ -90,6 +97,7 @@ class ZotFetch {
 
     // Reset per-batch attempt tracker so previous runs don't carry over counts.
     ZotFetch._batchAttemptTracker.clear();
+    ZotFetch._nativeDoiFailedHosts.clear();
     const fastMode = !forceMode && (ultraFast || ZotFetchPrefs.isFastModeEnabled());
     const runFallbackPass = !forceMode && fastMode && !ultraFast;
     const requestDelayMs = ultraFast
@@ -283,17 +291,17 @@ class ZotFetch {
       // users on institutional IP/VPN and for users with EZproxy configured in
       // Zotero → Preferences → Proxies.
       if (candidate.sourceId === "native-doi") {
-        // The sentinel early-exit bypasses the negativeCache and localHostAborts
-        // checks below. Apply them explicitly so that when an earlier pipeline
-        // candidate (e.g. Unpaywall → sciencedirect.com) already detected a
-        // challenge, native-doi doesn't fire a second Zotero-UA captcha for the
-        // same paper. Cross-batch protection via negativeCache handles retries.
+        // Guard: skip if a challenge was already detected for this item or session
+        // (earlier candidate hit a captcha/auth wall for the same publisher),
+        // or if native-doi already failed for this publisher in this batch run
+        // (prevents N wasted requests when not on VPN/campus).
         if (ids.doi) {
           const _ph = ZotFetchPublisherHostFromDoi(ids.doi);
           if (_ph && ProtectedHosts.getHostPolicy(_ph)?.earlyAbortOnChallenge) {
             if (_localHostAborts.has(_ph) ||
-                ZotFetch.negativeCache.has(ids.doi, _ph)) {
-              Zotero.debug(`[ZotFetch] skip native-doi (${_ph} blocked)`);
+                ZotFetch.negativeCache.has(ids.doi, _ph) ||
+                ZotFetch._nativeDoiFailedHosts.has(_ph)) {
+              Zotero.debug(`[ZotFetch] skip native-doi (${_ph} blocked/failed-batch)`);
               continue;
             }
           }
@@ -303,6 +311,12 @@ class ZotFetch {
           stats.native++;
           Zotero.debug(`[ZotFetch] ✓ native-doi (item ${item.id})`);
           return "native-doi";
+        }
+        // native-doi failed: record the publisher host so remaining batch items
+        // skip it (one attempt per publisher per batch, not N attempts).
+        if (ids.doi) {
+          const _ph = ZotFetchPublisherHostFromDoi(ids.doi);
+          if (_ph) ZotFetch._nativeDoiFailedHosts.add(_ph);
         }
         continue;
       }

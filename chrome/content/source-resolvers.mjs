@@ -485,15 +485,6 @@ var NativeDoiSourceResolver = class {
 
   async buildCandidates(_item, ids) {
     if (!ids.doi) return [];
-    // Skip for bot-detection publishers: native-doi always follows doi.org →
-    // publisher page with Zotero's real UA, reliably triggering captcha.
-    // DoiLandingSourceResolver serves the same path with spoofed browser headers
-    // and is protected by attempt limiting and the negative cache.
-    const pubHost = _publisherHostFromDoi(ids.doi);
-    if (pubHost && ProtectedHosts.getHostPolicy(pubHost)?.earlyAbortOnChallenge) {
-      Zotero.debug(`[ZotFetch] NativeDoiSourceResolver: skip ${pubHost} (bot-detection publisher)`);
-      return [];
-    }
     return [{
       sourceId: "native-doi",
       label: "Zotero Native (DOI)",
