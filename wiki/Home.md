@@ -2,7 +2,7 @@
 
 **ZotFetch** is a Zotero 8 plugin that automatically downloads PDFs for entire library selections using a smart multi-source pipeline. This manual covers everything you need to start downloading PDFs and configuring institutional access.
 
-> **Version:** 1.4.0 · **Author:** Fabio Dossi · **License:** MIT  
+> **Version:** 1.4.3 · **Author:** Fabio Dossi · **License:** MIT  
 > **Repository:** https://github.com/fdossi/zotfetch
 
 ---
@@ -26,7 +26,7 @@
 
 ## 1. Installation
 
-1. Download `zotfetch-1.4.0.xpi` from the [Releases page](https://github.com/fdossi/zotfetch/releases/latest).
+1. Download `zotfetch-1.4.3.xpi` from the [Releases page](https://github.com/fdossi/zotfetch/releases/latest).
 2. In Zotero: **Tools → Add-ons → ⚙ → Install Add-on From File…**
 3. Select the downloaded `.xpi` file and click **Open**.
 4. Zotero will prompt for a restart — click **Restart Now**.
@@ -204,6 +204,8 @@ If you leave the CAPES Gateway URL blank but keep the toggle on, ZotFetch sends 
 
 ## 7. All Settings Reference
 
+> **Security note:** Email address, API key, and proxy URLs are stored in Zotero's **encrypted Login Manager** (backed by the OS keychain or Zotero master password), not in plain-text preferences. You can only set or change them through this Preferences dialog.
+
 | Setting | Default | Description |
 |---|---|---|
 | **Email address** | *(empty)* | Used by Unpaywall, CrossRef, OpenAlex, EuropePMC. The plugin uses a fallback address if you leave it empty, but setting your own gives you better rate limits and support. |
@@ -265,3 +267,6 @@ ZotFetch automatically looks up missing DOIs via CrossRef using the title and au
 
 **Ultra Fast completed but many items missing**  
 Expected — Ultra Fast skips CAPES. Follow up with **Batch Download** or **Retry Failed** in standard Fast Mode.
+
+**A dialog appeared after the batch listing items that need institutional access**  
+This is the paywalled-items advisory (new in v1.4.3). If you're on campus or VPN, simply run **Retry Failed** — institutional authentication happens automatically. If you're off-campus, open **Preferences** and configure your Institutional Proxy or CAPES URL first.

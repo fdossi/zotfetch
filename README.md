@@ -1,10 +1,8 @@
 # ZotFetch: Batch PDF Downloader for Zotero
 
-![ZotFetch banner](banner.jpg)
-
 [![DOI](https://zenodo.org/badge/1186582529.svg)](https://doi.org/10.5281/zenodo.19149482)
 
-**Author:** Fabio Dossi &nbsp;|&nbsp; **Version:** 1.4.0 &nbsp;|&nbsp; [📖 User Manual (Wiki)](https://github.com/fdossi/zotfetch/wiki)
+**Author:** Fabio Dossi &nbsp;|&nbsp; **Version:** 1.4.3 &nbsp;|&nbsp; [📖 User Manual (Wiki)](https://github.com/fdossi/zotfetch/wiki)
 
 **ZotFetch** is a [Zotero 8](https://www.zotero.org/) plugin that automatically downloads PDFs for multiple library items in a single operation. It uses a modular two-stage pipeline — **source resolution** then **PDF extraction** — so that landing pages from publishers, proxies, and repositories are correctly resolved to their actual PDF URL before import.
 
@@ -47,7 +45,7 @@ cd autoPDFdownloader
 python build.py --clean
 ```
 
-This creates `zotfetch-1.4.0.xpi`. Install it via the steps above.
+This creates `zotfetch-1.4.3.xpi`. Install it via the steps above.
 
 ---
 
@@ -102,10 +100,10 @@ Click **? Help** in the dialog to open the [User Manual](https://github.com/fdos
 
 All preferences are also editable directly in **`about:config`** (Zotero's advanced config editor, **Edit → Settings → Advanced → Config Editor**), filtering by `extensions.zotfetch`.
 
+> **Security note (v1.4.3+):** Sensitive credentials — email, API key, and proxy URLs — are stored in Zotero's encrypted Login Manager, **not** in `about:config`. Use the **Preferences dialog** to set or change them; editing the `extensions.zotfetch.*` pref keys for these fields in `about:config` has no effect.
+
 | Preference key | Default | Description |
 |---|---|---|
-| `extensions.zotfetch.unpaywallEmail` | _(empty)_ | Your email for Unpaywall/OpenAlex/CrossRef API access. **Required** for most sources. |
-| `extensions.zotfetch.institutionalProxyUrl` | _(empty)_ | Your institution's proxy URL, e.g. `https://proxy.myuniversity.edu/login?url=` |
 | `extensions.zotfetch.fastMode` | `true` | Enables two-pass Fast Mode |
 | `extensions.zotfetch.batchSize` | `30` | Max items to process per batch run |
 | `extensions.zotfetch.requestDelayMs` | `900` | Base delay between requests (ms), ±60% jitter applied |
@@ -113,9 +111,17 @@ All preferences are also editable directly in **`about:config`** (Zotero's advan
 | `extensions.zotfetch.requestTimeoutMs` | `15000` | Per-request HTTP timeout (ms) |
 | `extensions.zotfetch.antiCaptchaMode` | `true` | Skip domains that are currently in cooldown |
 | `extensions.zotfetch.enableCapesFallback` | `true` | Enable CAPES/DOI proxy as a fallback source |
-| `extensions.zotfetch.proxyUrl` | _(empty)_ | CAPES or generic DOI proxy URL |
 | `extensions.zotfetch.unpaywallTimeoutMs` | `12000` | Timeout for Unpaywall API requests (ms) |
 | `extensions.zotfetch.crossrefTimeoutMs` | `10000` | Timeout for CrossRef DOI lookup (ms) |
+
+**Credentials (managed via Preferences dialog only — stored in encrypted Login Manager):**
+
+| Field | Description |
+|---|---|
+| Email address | Your email for Unpaywall/OpenAlex/CrossRef API access. **Required** for most sources. |
+| Institutional Proxy URL | Your institution's EZproxy URL, e.g. `https://proxy.myuniversity.edu/login?url=` |
+| CAPES Gateway URL | CAPES authenticated gateway URL |
+| CORE API Key | Free key from core.ac.uk/services/api (optional) |
 
 ### Institutional proxy URL formats
 
@@ -206,6 +212,19 @@ THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPL
 ---
 
 ## Changelog
+
+### v1.4.3 — Encrypted credential storage + paywalled-items advisory
+- **Security**: Sensitive credentials (email, API key, institutional proxy URL, CAPES URL) are now stored in Zotero's **encrypted Login Manager** (`nsILoginManager`) instead of plain-text SQLite prefs. Credentials are protected by the OS keychain or Zotero master password.
+- **Migration**: On first startup after upgrading, any existing plain-text pref values are automatically migrated to SecureStorage and wiped from `extensions.zotfetch.*` prefs — no user action required.
+- **New**: After a batch run, if items failed due to subscription walls and no institutional access method is configured, ZotFetch now shows a clear alert listing affected titles with actionable next-steps (configure proxy / run Retry Failed on VPN).
+- **Fix**: SemanticScholar API User-Agent now reports the current plugin version (`ZotFetch/1.4.3`) instead of a hardcoded stale string.
+
+### v1.4.2 — VPN / native-doi fix
+- **Fix**: `NativeDoiSourceResolver` was unconditionally skipping protected publishers (Elsevier, Wiley, Springer, ACS), which prevented downloads on VPN even when institutional access was active. The early-abort guard is now correctly limited to `NativeSourceResolver` (Zotero's built-in OA finder), which reports itself with Zotero's real UA.
+
+### v1.4.1 — Elsevier captcha cascade fix
+- **Fix**: Elsevier `nopdf` results (article not in the subscribed collection) no longer trigger a domain captcha cooldown. The cascade that was blocking subsequent items in the same batch from any Elsevier-hosted source has been resolved.
+- **Fix**: `ScienceDirect` publisher routing improved — publisher-pattern resolver correctly handles linkinghub.elsevier.com redirect targets.
 
 ### v1.4.0 — Graphical preferences, captcha protection, UA refresh
 - **New**: Graphical **Preferences dialog** (`Tools → ZotFetch → Preferences` or right-click submenu). All settings configurable in a clean UI — no `about:config` required.

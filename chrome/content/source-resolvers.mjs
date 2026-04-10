@@ -159,7 +159,7 @@ var SemanticScholarSourceResolver = class {
       const resp = await Zotero.HTTP.request("GET", url, {
         responseType: "json",
         timeout: 10000,
-        headers: { "User-Agent": "ZotFetch/1.2 (mailto:zotfetch@gmail.com)" }
+        headers: { "User-Agent": `ZotFetch/${ZotFetchPlugin?.version || "1.4"} (mailto:zotfetch@gmail.com)` }
       });
 
       const pdfUrl = resp.response?.openAccessPdf?.url;
