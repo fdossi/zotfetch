@@ -389,19 +389,23 @@ const DEFAULTS = {
   crossrefTimeoutMs:     10000
 };
 
-function g(id)    { return document.getElementById(id); }
-function pget(k)  { return P ? P.get(k) : DEFAULTS[k]; }
-function pset(k,v){ if (P) P.set(k, v); }
+function g(id)         { return document.getElementById(id); }
+function pget(k)       { return P ? P.get(k) : DEFAULTS[k]; }
+function pset(k,v)     { if (P) P.set(k, v); }
+// Sensitive credentials are stored in the Login Manager (encrypted), never
+// in plain-text prefs.  Fall back to "" when the bridge is unavailable.
+function pSecureGet(k)  { return (P && P.secureGet) ? (P.secureGet(k) || "") : ""; }
+function pSecureSet(k,v){ if (P && P.secureSet) P.secureSet(k, v); }
 
 // ── Load current values ─────────────────────────────────────────────────
 function load() {
   if (P && P.version) g("ver").textContent = "v" + P.version;
 
-  g("f-email").value         = pget("unpaywallEmail")        || "";
-  g("f-core").value          = pget("coreApiKey")            || "";
-  g("f-proxy").value         = pget("institutionalProxyUrl") || "";
+  g("f-email").value         = pSecureGet("unpaywallEmail")        || "";
+  g("f-core").value          = pSecureGet("coreApiKey")            || "";
+  g("f-proxy").value         = pSecureGet("institutionalProxyUrl") || "";
   g("f-capes-on").checked    = pget("enableCapesFallback") !== false;
-  g("f-capes-url").value     = pget("proxyUrl")              || "";
+  g("f-capes-url").value     = pSecureGet("proxyUrl")              || "";
   g("f-fast").checked        = pget("fastMode")              !== false;
   g("f-batch").value         = pget("batchSize")             ?? 30;
   g("f-delay").value         = pget("requestDelayMs")        ?? 900;
@@ -467,11 +471,11 @@ function saveAndClose() {
   clearError();
   if (!validate()) return;
 
-  pset("unpaywallEmail",        g("f-email").value.trim());
-  pset("coreApiKey",            g("f-core").value.trim());
-  pset("institutionalProxyUrl", g("f-proxy").value.trim());
-  pset("enableCapesFallback",   g("f-capes-on").checked);
-  pset("proxyUrl",              g("f-capes-url").value.trim());
+  pSecureSet("unpaywallEmail",        g("f-email").value.trim());
+  pSecureSet("coreApiKey",            g("f-core").value.trim());
+  pSecureSet("institutionalProxyUrl", g("f-proxy").value.trim());
+  pset("enableCapesFallback",         g("f-capes-on").checked);
+  pSecureSet("proxyUrl",              g("f-capes-url").value.trim());
   pset("fastMode",              g("f-fast").checked);
   pset("batchSize",             parseInt(g("f-batch").value,     10));
   pset("requestDelayMs",        parseInt(g("f-delay").value,     10));

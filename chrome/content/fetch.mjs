@@ -202,6 +202,47 @@ class ZotFetch {
     );
     progress.setProgress(100);
     progressWindow.startCloseTimer(10000);
+    this._showPaywallAdvisory();
+  }
+
+  // ── Post-batch paywalled-items advisory ─────────────────────────────────
+
+  /**
+   * After a batch run, if items failed due to subscription walls AND no
+   * institutional access method is configured, show a clear alert with
+   * actionable guidance.
+   *
+   * Skipped when a proxy or CAPES URL is already set — the user can simply
+   * run Retry Failed and their credentials will handle authentication.
+   */
+  static _showPaywallAdvisory() {
+    const authFailed = [...ZotFetch.failedItems.values()].filter(
+      i => i.reason === "auth" || i.reason === "blocked"
+    );
+    if (!authFailed.length) return;
+
+    const hasProxy = ZotFetchPrefs.isInstitutionalProxyEnabled();
+    const hasCapes = ZotFetchPrefs.isCapesEnabled() && !!ZotFetchPrefs.getProxyUrl();
+    if (hasProxy || hasCapes) return; // acesso institucional configurado → usuário já sabe retentar
+
+    const count   = authFailed.length;
+    const maxShow = 5;
+    const titles  = authFailed.slice(0, maxShow)
+      .map((info, n) => `  ${n + 1}. ${ZotFetch.getItemLabel(info.item)}`)
+      .join("\n");
+    const overflow = count > maxShow ? `\n  … e mais ${count - maxShow}` : "";
+
+    Zotero.alert(
+      null,
+      `ZotFetch — ${count} ${count === 1 ? "item requer" : "itens requerem"} acesso institucional`,
+      `Os itens abaixo não foram baixados por exigirem autenticação de assinatura:\n\n` +
+      titles + overflow +
+      `\n\nComo obter esses PDFs:\n` +
+      `  • No campus ou com VPN ativa: execute ZotFetch ▶ Retry Failed —\n` +
+      `    a rede autentica automaticamente.\n` +
+      `  • Fora do campus: abra ZotFetch ▶ Preferências e configure\n` +
+      `    o URL do Proxy Institucional (EZproxy) ou do Portal CAPES.`
+    );
   }
 
   // ── Main item processor ─────────────────────────────────────────────────
