@@ -72,6 +72,51 @@ const _PROTECTED_POLICIES = {
     negativeCacheTtlMs:     2 * 60 * 60 * 1000,
     negativeCacheTtlAuthMs: 20 * 60 * 1000,
     minGapMs:               4000
+  },
+  // Taylor & Francis (tandfonline.com) — Cloudflare-protected; repeated hits
+  // from the same IP rapidly escalate to a full Turnstile challenge block.
+  "tandfonline.com": {
+    allowHead:              false,
+    maxAttemptsPerItem:     1,
+    earlyAbortOnChallenge:  true,
+    retryOnCaptcha:         false,
+    negativeCacheTtlMs:     2 * 60 * 60 * 1000,
+    negativeCacheTtlAuthMs: 20 * 60 * 1000,
+    minGapMs:               5000
+  },
+  // Royal Society of Chemistry — uses Akamai Bot Manager; rate-limits
+  // aggressively after 2–3 unauthenticated requests from the same IP.
+  "pubs.rsc.org": {
+    allowHead:              false,
+    maxAttemptsPerItem:     1,
+    earlyAbortOnChallenge:  true,
+    retryOnCaptcha:         false,
+    negativeCacheTtlMs:     2 * 60 * 60 * 1000,
+    negativeCacheTtlAuthMs: 20 * 60 * 1000,
+    minGapMs:               5000
+  },
+  // SAGE Publications — uses Cloudflare; aggressive fingerprinting on
+  // non-browser TLS + no-cookie sessions.
+  "journals.sagepub.com": {
+    allowHead:              false,
+    maxAttemptsPerItem:     1,
+    earlyAbortOnChallenge:  true,
+    retryOnCaptcha:         false,
+    negativeCacheTtlMs:     2 * 60 * 60 * 1000,
+    negativeCacheTtlAuthMs: 20 * 60 * 1000,
+    minGapMs:               4000
+  },
+  // Oxford University Press — Akamai Bot Manager; aggressive on repeated
+  // requests from non-browser TLS stacks.  Most OUP content is gated behind
+  // institutional subscription; open-access articles use citation_pdf_url.
+  "academic.oup.com": {
+    allowHead:              false,
+    maxAttemptsPerItem:     1,
+    earlyAbortOnChallenge:  true,
+    retryOnCaptcha:         false,
+    negativeCacheTtlMs:     2 * 60 * 60 * 1000,
+    negativeCacheTtlAuthMs: 20 * 60 * 1000,
+    minGapMs:               5000
   }
 };
 

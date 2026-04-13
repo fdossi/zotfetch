@@ -570,6 +570,138 @@ async function _validatePdf(url, headers, ctx, landingUrl) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HiddenBrowserPDFResolver
+// Uses Zotero's hidden Gecko browser (Zotero.HTTP.processDocuments) to load
+// landing pages that XHR-based resolvers could not handle — typically because
+// the server returned a JS challenge page instead of real HTML.
+//
+// Why this works where XHR fails:
+//   • Runs a full Gecko/Firefox JS engine — Cloudflare "Just a moment…" and
+//     Akamai Bot Manager fingerprinting challenges are actually executed and
+//     solved before the processor callback receives the DOM.
+//   • Presents a real Firefox TLS fingerprint (JA3/JA4) — bypasses TLS-level
+//     bot detection that flags XMLHttpRequest's stack.
+//   • Maintains its own cookie jar across the page load — challenge cookies
+//     (cf_clearance, _abck, …) acquired by the JS are honoured by any
+//     subsequent requests the page makes before the DOM is returned.
+//
+// Placement: LAST in the resolver chain.  It is only invoked after both
+// PublisherPatternResolver and HtmlLandingPDFResolver have already failed,
+// which almost always means the XHR response was a challenge page.  For URLs
+// that loaded fine via XHR but yielded no PDF link, the hidden browser gives
+// a second chance on the fully JS-rendered DOM.
+//
+// Limitations:
+//   • Human-verification CAPTCHAs (reCAPTCHA checkbox, hCaptcha image grids)
+//     cannot be solved and result in a "captcha" failure as with XHR.
+//   • Subscription-only content still requires institutional access (IP/VPN/
+//     EZproxy) — the hidden browser has no user login cookies.
+//   • Requires Zotero 7+ (processDocuments API).
+// ─────────────────────────────────────────────────────────────────────────────
+
+var HiddenBrowserPDFResolver = class {
+  canResolve(candidate) {
+    return candidate.kind === "landing-page" && HiddenBrowserPDFResolver.isAvailable();
+  }
+
+  /** True when Zotero exposes the hidden Gecko browser API. */
+  static isAvailable() {
+    return typeof Zotero.HTTP?.processDocuments === "function";
+  }
+
+  async resolve(candidate, ctx) {
+    const url  = candidate.url;
+
+    // Security: only allow https/http — never file://, javascript:, data:, etc.
+    // A compromised upstream API (Unpaywall, OpenAlex, …) could return an
+    // arbitrary URL; loading it in processDocuments runs in Zotero's privileged
+    // Gecko context, so we must whitelist the scheme here as a defence-in-depth
+    // check (importResolvedPdf already validates the final PDF URL, but this
+    // guard must fire before processDocuments is called).
+    if (!/^https?:\/\//i.test(url)) {
+      ctx.logger(`[HiddenBrowserPDFResolver] Blocked non-http(s) URL: ${url.substring(0, 80)}`);
+      return { ok: false, failureReason: "network" };
+    }
+
+    const host = candidate.meta?.publisherHost || Utils.getDomain(url);
+    ctx.logger(`[HiddenBrowserPDFResolver] Loading in hidden browser: ${url.substring(0, 80)} host=${host}`);
+    const t0 = Date.now();
+
+    let extracted  = null;
+    let failReason = "nopdf";
+
+    try {
+      // processDocuments launches a real hidden Firefox instance.  The page
+      // loads as in a genuine browser: JS executes, challenge cookies are set,
+      // JS redirects are followed.  The `doc` argument in the callback is the
+      // live DOM *after* all JS has run — i.e. the real publisher HTML.
+      // No external cookie sandbox is passed so Zotero's shared cookie store
+      // is used; any cf_clearance / _abck cookies persist for the session and
+      // are available to the publisher's own follow-up requests within the tab.
+      await Zotero.HTTP.processDocuments(
+        [url],
+        (doc, docUrl) => {
+          const base = docUrl || url;
+
+          // Even after JS execution a hard CAPTCHA widget (reCAPTCHA checkbox,
+          // hCaptcha image grid) may remain — detect it first.
+          const ch = ProtectedHosts.detectChallengeInDoc(doc);
+          if (ch === "captcha") {
+            ctx.logger(`[HiddenBrowserPDFResolver] Hard captcha after JS exec on ${host} (${Date.now() - t0}ms)`);
+            failReason = "captcha";
+            return;
+          }
+          if (ch === "auth" || ch === "blocked") {
+            ctx.logger(`[HiddenBrowserPDFResolver] ${ch} wall on ${host} (${Date.now() - t0}ms)`);
+            failReason = ch;
+            return;
+          }
+
+          // Try publisher-specific rule first, then generic extraction.
+          // The publisher rules use exactly the same DOM queries as
+          // PublisherPatternResolver — they just now run on the fully rendered
+          // JS DOM instead of the raw XHR response.
+          const rule = PUBLISHER_RULES.find(r => r.hostPattern.test(host));
+          extracted = (rule ? rule.extract(doc, base) : null) || _genericPdfExtract(doc, base);
+
+          if (extracted) {
+            ctx.logger(`[HiddenBrowserPDFResolver] Extracted: ${extracted.substring(0, 80)} (${Date.now() - t0}ms)`);
+          } else {
+            ctx.logger(`[HiddenBrowserPDFResolver] No PDF link in rendered DOM of ${host} (${Date.now() - t0}ms)`);
+          }
+        }
+      );
+    } catch (err) {
+      ctx.logger(`[HiddenBrowserPDFResolver] Error: ${err?.message || err}`);
+      return { ok: false, failureReason: "network" };
+    }
+
+    if (failReason !== "nopdf") {
+      return { ok: false, failureReason: failReason };
+    }
+
+    if (!extracted) {
+      return { ok: false, failureReason: "nopdf" };
+    }
+
+    // Validate using the same HEAD/trust logic as the other resolvers.
+    const validated = await _validatePdf(extracted, candidate.headers, ctx, url);
+    if (!validated) {
+      ctx.logger(`[HiddenBrowserPDFResolver] Validation failed: ${extracted.substring(0, 80)}`);
+      return { ok: false, failureReason: "nopdf" };
+    }
+
+    return {
+      ok: true,
+      finalPdfUrl: extracted,
+      method: "hidden-browser",
+      headers: candidate.headers
+    };
+  }
+};
+
 this.DirectPDFResolver = DirectPDFResolver;
 this.PublisherPatternResolver = PublisherPatternResolver;
 this.HtmlLandingPDFResolver = HtmlLandingPDFResolver;
+this.HiddenBrowserPDFResolver = HiddenBrowserPDFResolver;

@@ -14,9 +14,9 @@
 //                                       translator library + Zotero proxy rules)
 //         PDFResolver[].resolve()   — HEAD/GET → real PDF URL
 //           ├─ DirectPDFResolver            — kind=direct-pdf
-//           ├─ PublisherPatternResolver     — landing-page, known hosts
-//           ├─ HtmlLandingPDFResolver       — landing-page, generic extraction
-//           └─ HtmlLandingPDFResolver         — generic meta/link/iframe/anchor extraction
+//           ├─ PublisherPatternResolver     — landing-page, known publisher hosts
+//           ├─ HtmlLandingPDFResolver       — landing-page, generic meta/link/anchor
+//           └─ HiddenBrowserPDFResolver     — landing-page, Gecko JS engine (Cloudflare/Akamai)
 //         AttachmentImporter.importResolvedPdf()
 //
 // Adding a new source: implement SourceResolver and add it to _buildSourceResolvers().
@@ -33,6 +33,10 @@ const SAFE_OA_HOSTS = new Set([
   "core.ac.uk", "doaj.org", "oapen.org",
   "psyarxiv.com", "osf.io", "ssrn.com",
   "mdpi.com",
+  "plos.org",                          // PLOS journals (journals.plos.org etc.)
+  "elifesciences.org",                 // eLife — fully OA
+  "biomedcentral.com",                 // BioMed Central / Springer Nature OA
+  "f1000research.com",                 // F1000Research — fully OA
   "semanticscholar.org", "pdfs.semanticscholar.org",
   "openalex.org"
 ]);
@@ -111,8 +115,10 @@ class ZotFetch {
       openalex: 0,
       core: 0,
       europepmc: 0,
+      oarepository: 0,
       institutional: 0,
       capes: 0,
+      hiddenbrowser: 0,
       deferred: 0,
       notFound: 0,
       failed: 0,
@@ -198,7 +204,7 @@ class ZotFetch {
     }
 
     progress.setText(
-      `${this.getProgressStatus(stats, batch.length, batch.length, true)} Concluído: ${stats.downloaded} baixados (nativo ${stats.native}, Unpaywall ${stats.unpaywall}, S2 ${stats.semanticscholar}, OA ${stats.openalex}, CORE ${stats.core}, EPMC ${stats.europepmc}, Institucional ${stats.institutional}, CAPES ${stats.capes}) | pendentes ${stats.deferred} | DOI recuperado ${stats.doiRecovered} | não encontrado ${stats.notFound} | erros ${stats.failed} | captcha ${stats.captcha}`
+      `${this.getProgressStatus(stats, batch.length, batch.length, true)} Concluído: ${stats.downloaded} baixados (nativo ${stats.native}, Unpaywall ${stats.unpaywall}, S2 ${stats.semanticscholar}, OA ${stats.openalex}, CORE ${stats.core}, EPMC ${stats.europepmc}, Institucional ${stats.institutional}, CAPES ${stats.capes}${stats.oarepository ? `, OARepo ${stats.oarepository}` : ""}${stats.hiddenbrowser ? `, HiddenBrowser ${stats.hiddenbrowser}` : ""}) | pendentes ${stats.deferred} | DOI recuperado ${stats.doiRecovered} | não encontrado ${stats.notFound} | erros ${stats.failed} | captcha ${stats.captcha}`
     );
     progress.setProgress(100);
     progressWindow.startCloseTimer(10000);
@@ -470,15 +476,15 @@ class ZotFetch {
         stats.downloaded++;
         const sid = candidate.sourceId;
         Zotero.debug(`[ZotFetch] ✓ ${sid} (${Date.now() - t0}ms, item ${item.id})`);
-        if (sid === "unpaywall")             stats.unpaywall++;
-        else if (sid === "semanticscholar")  stats.semanticscholar++;
-        else if (sid === "openalex")         stats.openalex++;
-        else if (sid === "core")             stats.core++;
-        else if (sid === "europepmc")        stats.europepmc++;
+        if (result.method === "hidden-browser")  stats.hiddenbrowser++;
+        if (sid === "unpaywall")                        stats.unpaywall++;
+        else if (sid === "semanticscholar")             stats.semanticscholar++;
+        else if (sid === "openalex")                   stats.openalex++;
+        else if (sid === "core")                       stats.core++;
+        else if (sid === "europepmc")                  stats.europepmc++;
         else if (sid.startsWith("institutional-proxy")) stats.institutional++;
-        else if (sid === "capes")            stats.capes++;
-
-        else                                 stats.unpaywall++; // oa-repo / doi-landing → unpaywall bucket
+        else if (sid === "capes")                      stats.capes++;
+        else                                           stats.oarepository++; // oa-repository / doi-landing / arXiv
         return sid;
       }
     }
@@ -525,7 +531,13 @@ class ZotFetch {
     return [
       new DirectPDFResolver(),
       new PublisherPatternResolver(),
-      new HtmlLandingPDFResolver()
+      new HtmlLandingPDFResolver(),
+      // HiddenBrowserPDFResolver is tried last: it spins up a real Gecko
+      // browser instance (Zotero.HTTP.processDocuments) so JS challenges
+      // (Cloudflare, Akamai) are executed and solved before the DOM is
+      // inspected.  Only fires when the XHR-based resolvers above already
+      // failed — typically because the server returned a challenge page.
+      new HiddenBrowserPDFResolver()
     ];
   }
 
@@ -533,6 +545,17 @@ class ZotFetch {
    * Run a SourceCandidate through matching PDFResolvers until one succeeds.
    */
   static async _resolveCandidate(candidate, resolvers) {
+    // Security: reject any non-http(s) URL that may have been returned by a
+    // third-party API (Unpaywall, OpenAlex, Semantic Scholar, CORE, …) before
+    // it reaches Zotero.HTTP.request or processDocuments.  A file://, data:,
+    // or javascript: URL loaded in Zotero's privileged Gecko context could
+    // read local files or execute arbitrary code.
+    // Empty-string URLs belong to sentinel candidates (native / native-doi)
+    // which are handled upstream and never reach this method.
+    if (candidate.url && !/^https?:\/\//i.test(candidate.url)) {
+      Zotero.debug(`[ZotFetch] _resolveCandidate: blocked non-http(s) URL — ${String(candidate.url).substring(0, 80)}`);
+      return { ok: false, failureReason: "network" };
+    }
     const ctx = {
       timeoutMs: ZotFetchPrefs.getRequestTimeoutMs(),
       cooldown: this.cooldown,
@@ -639,7 +662,7 @@ class ZotFetch {
     const domain = Utils.getDomain(url);
     if (ZotFetchPrefs.isAntiCaptchaMode() && this.cooldown.isDomainCoolingDown(domain)) return false;
 
-    if (source.includes("Institutional") || source.includes("CAPES") || source.includes("Sci-Hub")) {
+    if (source.includes("Institutional") || source.includes("CAPES")) {
       await this.cooldown.applyProtectedDelay();
     }
     await this.cooldown.honorDomainGap(domain, ZotFetchPrefs);
@@ -658,7 +681,7 @@ class ZotFetch {
         DNT: "1",
         Referer: source.includes("Institutional") || source.includes("CAPES")
           ? "https://scholar.google.com/"
-          : source.includes("Sci-Hub") ? "https://sci-hub.se/" : "https://doi.org/"
+          : "https://doi.org/"
       }
     };
 
@@ -706,7 +729,9 @@ class ZotFetch {
     try {
       let queryURL = `https://api.crossref.org/works?query.title=${encodeURIComponent(title)}`;
       if (firstAuthor) queryURL += `&query.author=${encodeURIComponent(firstAuthor)}`;
-      if (year) queryURL += `&filter=from-pub-date:${year},until-pub-date:${year}`;
+      // Validate year is a 4-digit number before inserting into the filter
+      // parameter — prevents query-parameter injection from a crafted item.
+      if (year && /^\d{4}$/.test(year)) queryURL += `&filter=from-pub-date:${year},until-pub-date:${year}`;
       queryURL += `&rows=3&select=DOI,title,published&mailto=${encodeURIComponent(email)}`;
 
       const response = await Zotero.HTTP.request("GET", queryURL, {
@@ -849,7 +874,9 @@ class ZotFetch {
     }
     const withDoi = authInfos.filter(info => info.doi);
     for (const info of withDoi.slice(0, 3)) {
-      try { Zotero.launchURL(`https://doi.org/${info.doi}`); } catch (e) {}
+      // encodeURI preserves the '/' separator required by DOI syntax while
+      // encoding any special characters that could alter the URL structure.
+      try { Zotero.launchURL(`https://doi.org/${encodeURI(info.doi)}`); } catch (e) {}
     }
     const titles = authInfos.slice(0, 8).map((info, i) =>
       `${i + 1}. ${this.getItemLabel(info.item)} [${info.reason}]`

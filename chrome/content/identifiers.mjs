@@ -79,8 +79,8 @@ var IdentifierExtractor = {
     // Fallback: scan the Extra field (common in Zotero imports).
     if (!doi) {
       const extra = String(item.getField("extra") || "").trim();
-      const match = extra.match(/^DOI:\s*(.+)$/im);
-      if (match) doi = Utils.normalizeDOI(match[1]);
+      const match = extra.match(/^DOI:\s*(.+?)\s*$/im);
+      if (match) doi = Utils.normalizeDOI(match[1].replace(/[.,;)\]]+$/, ""));
     }
 
     if (doi) ids.doi = doi;
@@ -90,11 +90,30 @@ var IdentifierExtractor = {
     const pmidMatch = extra.match(/PMID:\s*(\d+)/i);
     if (pmidMatch) ids.pmid = pmidMatch[1].trim();
 
+    // ── PMCID ────────────────────────────────────────────────────────────────
+    // PubMed Central ID (e.g. "PMC1234567") — its presence guarantees the paper
+    // is deposited in PMC and is therefore open access.  Many Zotero translators
+    // write "PMCID: PMC1234567" in the Extra field on import.
+    const pmcidMatch = extra.match(/PMCID?:\s*(PMC\d+)/i);
+    if (pmcidMatch) ids.pmcid = pmcidMatch[1].toUpperCase();
+
     // ── arXiv ─────────────────────────────────────────────────────────────────
+    // Check all fields where Zotero stores arXiv IDs in order of reliability:
+    //   1. archiveID  — set by translators for arXiv items ("2301.00001")
+    //   2. archiveLocation — sometimes stores "arXiv:2301.00001" (Google Scholar etc.)
+    //   3. url field  — arXiv landing or PDF URLs
+    //   4. Extra      — catch-all for bulk imports via CrossRef / DOI metadata
     const archiveID = String(item.getField("archiveID") || "");
     if (archiveID) {
       const arxiv = this._extractArxivId(archiveID);
       if (arxiv) ids.arxivId = arxiv;
+    }
+    if (!ids.arxivId) {
+      const archiveLoc = String(item.getField("archiveLocation") || "");
+      if (archiveLoc) {
+        const arxiv = this._extractArxivId(archiveLoc);
+        if (arxiv) ids.arxivId = arxiv;
+      }
     }
     if (!ids.arxivId) {
       const urlField = String(item.getField("url") || "");
@@ -171,18 +190,34 @@ var IdentifierExtractor = {
   _extractDoiFromString(str) {
     if (!str) return null;
     const match = str.match(/(?:doi\.org\/|DOI:|doi:)\s*(10\.\d{4,}\/\S+)/i);
-    if (match) return Utils.normalizeDOI(match[1]);
+    if (match) return Utils.normalizeDOI(match[1].replace(/[.,;)\]]+$/, ""));
     // Plain DOI without prefix
     const plainMatch = str.match(/\b(10\.\d{4,}\/\S+)/);
-    if (plainMatch) return Utils.normalizeDOI(plainMatch[1]);
+    if (plainMatch) return Utils.normalizeDOI(plainMatch[1].replace(/[.,;)\]]+$/, ""));
     return null;
   },
 
   _extractArxivId(str) {
     if (!str) return null;
-    // Matches: arxiv:2301.00001, arxiv.org/abs/2301.00001, arxiv.org/pdf/2301.00001
-    const match = str.match(/arxiv[./: ]+(?:abs\/|pdf\/)?(\d{4}\.\d{4,}(?:v\d+)?)/i);
-    return match ? match[1] : null;
+    // arxiv.org URL — new-style (post-2007): "https://arxiv.org/abs/2301.00001"
+    // Must check the .org/ URL pattern explicitly: the generic prefix check
+    // below uses [:/\s]+ which stops at 'o' in "arxiv.org" and fails.
+    let m = str.match(/arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,}(?:v\d+)?)/i);
+    if (m) return m[1];
+    // arxiv.org URL — old-style (pre-2007): "https://arxiv.org/abs/hep-ph/0601001"
+    m = str.match(/arxiv\.org\/(?:abs|pdf)\/([a-z][a-z.-]+\/\d{7}(?:v\d+)?)/i);
+    if (m) return m[1];
+    // Explicit prefix — new-style: "arXiv:2301.00001", "arxiv: 2301.00001"
+    m = str.match(/arxiv[:/\s]+(\d{4}\.\d{4,}(?:v\d+)?)/i);
+    if (m) return m[1];
+    // Explicit prefix — old-style: "arXiv:hep-ph/0601001"
+    m = str.match(/arxiv[:/\s]+([a-z][a-z.-]+\/\d{7}(?:v\d+)?)/i);
+    if (m) return m[1];
+    // Bare archiveID field — new-style: "2301.00001" (set by Zotero translators)
+    if (/^\d{4}\.\d{4,}(?:v\d+)?$/.test(str.trim())) return str.trim();
+    // Bare archiveID field — old-style: "hep-ph/0601001"
+    if (/^[a-z][a-z.-]+\/\d{7}(?:v\d+)?$/.test(str.trim())) return str.trim();
+    return null;
   }
 };
 

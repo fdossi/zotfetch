@@ -33,6 +33,7 @@ const _DOI_PREFIX_TO_HOST = {
   "10.1007": "link.springer.com",
   "10.1021": "pubs.acs.org",             // ACS Publications
   "10.1039": "pubs.rsc.org",             // Royal Society of Chemistry
+  "10.1093": "academic.oup.com",         // Oxford University Press
   "10.1177": "journals.sagepub.com",     // SAGE
   "10.1080": "tandfonline.com"           // Taylor & Francis
 };
@@ -107,18 +108,44 @@ var UnpaywallSourceResolver = class {
       });
 
       const data = resp.response;
-      const rawUrls = ZotFetch.getUnpaywallPDFs(data);
 
-      // Sort: direct-PDF hosts first; safe OA hosts before unknown ones.
-      const candidates = rawUrls.map((u, i) => ({
-        sourceId: "unpaywall",
-        label: "Unpaywall",
-        url: u,
-        kind: _looksLikePdf(u) ? "direct-pdf" : "landing-page",
-        priority: 100 - i,
-        headers: { Referer: "https://unpaywall.org/" }
-      }));
+      // Collect all unique URLs from the Unpaywall response — both direct PDF
+      // URLs (url_for_pdf) and OA HTML landing pages (url when url_for_pdf is
+      // absent).  HtmlLandingPDFResolver / PublisherPatternResolver handles the
+      // latter via citation_pdf_url or anchor heuristics.
+      const seen      = new Set();
+      const candidates = [];
+      let priority = 100;
 
+      // Helper: push a candidate if not already seen.
+      const _push = (url, kind) => {
+        if (!url || seen.has(url)) return;
+        seen.add(url);
+        candidates.push({
+          sourceId: "unpaywall",
+          label: "Unpaywall",
+          url,
+          kind,
+          priority: priority--,
+          headers: { Referer: "https://unpaywall.org/" }
+        });
+      };
+
+      const allLocations = [
+        data?.best_oa_location,
+        ...(Array.isArray(data?.oa_locations) ? data.oa_locations : [])
+      ].filter(Boolean);
+
+      for (const loc of allLocations) {
+        if (loc.url_for_pdf) {
+          _push(loc.url_for_pdf, _looksLikePdf(loc.url_for_pdf) ? "direct-pdf" : "landing-page");
+        } else if (loc.url && loc.is_oa) {
+          // No direct PDF URL but OA HTML landing page — add as landing-page.
+          _push(loc.url, "landing-page");
+        }
+      }
+
+      // Sort: safe OA hosts (arxiv, PMC, …) first; they succeed without auth.
       candidates.sort((a, b) => {
         const sa = ZotFetch.isSafeOAHost(Utils.getDomain(a.url)) ? 1 : 0;
         const sb = ZotFetch.isSafeOAHost(Utils.getDomain(b.url)) ? 1 : 0;
@@ -155,27 +182,44 @@ var SemanticScholarSourceResolver = class {
     await ZotFetch.cooldown.honorDomainGap(domain, ZotFetchPrefs);
 
     try {
-      const url = `https://api.semanticscholar.org/graph/v1/paper/DOI:${encodeURIComponent(ids.doi)}?fields=openAccessPdf`;
+      const url = `https://api.semanticscholar.org/graph/v1/paper/DOI:${encodeURIComponent(ids.doi)}?fields=openAccessPdf,externalIds`;
       const resp = await Zotero.HTTP.request("GET", url, {
         responseType: "json",
         timeout: 10000,
         headers: { "User-Agent": `ZotFetch/${ZotFetchPlugin?.version || "1.4"} (mailto:zotfetch@gmail.com)` }
       });
 
-      const pdfUrl = resp.response?.openAccessPdf?.url;
-      if (!pdfUrl) {
-        ZotFetch.cooldown.markDomainNonCaptcha(domain);
-        return [];
+      const pdfUrl   = resp.response?.openAccessPdf?.url;
+      const s2ArXiv  = resp.response?.externalIds?.ArXiv;
+
+      if (pdfUrl) {
+        ZotFetch.cooldown.markDomainSuccess(domain);
+        return [{
+          sourceId: "semanticscholar",
+          label: "Semantic Scholar",
+          url: pdfUrl,
+          kind: _looksLikePdf(pdfUrl) ? "direct-pdf" : "landing-page",
+          priority: 95
+        }];
       }
 
-      ZotFetch.cooldown.markDomainSuccess(domain);
-      return [{
-        sourceId: "semanticscholar",
-        label: "Semantic Scholar",
-        url: pdfUrl,
-        kind: _looksLikePdf(pdfUrl) ? "direct-pdf" : "landing-page",
-        priority: 95
-      }];
+      // Fallback: when S2 knows the arXiv ID (even if the Zotero item doesn't
+      // have it stored), build a direct arXiv PDF candidate.  S2 indexes many
+      // preprints whose arXiv ID never makes it into the Zotero archiveID field
+      // (e.g., items imported via CrossRef or PubMed metadata).
+      if (s2ArXiv && !ids.arxivId) {
+        ZotFetch.cooldown.markDomainSuccess(domain);
+        return [{
+          sourceId: "semanticscholar",
+          label: "Semantic Scholar (arXiv)",
+          url: `https://arxiv.org/pdf/${s2ArXiv}`,
+          kind: "direct-pdf",
+          priority: 94
+        }];
+      }
+
+      ZotFetch.cooldown.markDomainNonCaptcha(domain);
+      return [];
     } catch (error) {
       ZotFetch.cooldown.markDomainNonCaptcha(domain);
       Zotero.logError(error);
@@ -208,23 +252,36 @@ var OpenAlexSourceResolver = class {
         timeout: 10000
       });
 
-      const data = resp.response;
-      const pdfUrl = data?.best_oa_location?.pdf_url ||
-        (String(data?.open_access?.oa_url || "").toLowerCase().includes(".pdf")
-          ? data.open_access.oa_url : null);
+      const data        = resp.response;
+      const pdfUrl      = data?.best_oa_location?.pdf_url || null;
+      const landingUrl  = !pdfUrl ? (data?.best_oa_location?.landing_page_url || null) : null;
 
-      if (!pdfUrl) {
+      if (!pdfUrl && !landingUrl) {
         ZotFetch.cooldown.markDomainNonCaptcha(domain);
         return [];
       }
 
       ZotFetch.cooldown.markDomainSuccess(domain);
+
+      if (pdfUrl) {
+        return [{
+          sourceId: "openalex",
+          label: "OpenAlex",
+          url: pdfUrl,
+          kind: _looksLikePdf(pdfUrl) ? "direct-pdf" : "landing-page",
+          priority: 90
+        }];
+      }
+
+      // No direct PDF URL from OpenAlex — use the OA landing page.  The HTML
+      // resolver chain (HtmlLandingPDFResolver / PublisherPatternResolver) will
+      // extract citation_pdf_url or equivalent from the rendered page.
       return [{
         sourceId: "openalex",
         label: "OpenAlex",
-        url: pdfUrl,
-        kind: _looksLikePdf(pdfUrl) ? "direct-pdf" : "landing-page",
-        priority: 90
+        url: landingUrl,
+        kind: "landing-page",
+        priority: 89
       }];
     } catch (error) {
       ZotFetch.cooldown.markDomainNonCaptcha(domain);
@@ -349,6 +406,21 @@ var EuropePmcSourceResolver = class {
   enabled() { return true; }
 
   async buildCandidates(_item, ids) {
+    // Fast path: when the PubMed Central ID is already known the paper is
+    // guaranteed to be in PMC and therefore open access.  Skip the API search
+    // and build a direct landing-page candidate — Europe PMC exposes
+    // citation_pdf_url for every PMC article, so HtmlLandingPDFResolver
+    // resolves it in a single request without a prior API call.
+    if (ids.pmcid) {
+      return [{
+        sourceId: "europepmc",
+        label: "Europe PMC",
+        url: `https://europepmc.org/articles/${ids.pmcid}`,
+        kind: "landing-page",
+        priority: 89
+      }];
+    }
+
     // Needs at least a PMID or DOI.
     if (!ids.pmid && !ids.doi) return [];
 
@@ -436,29 +508,51 @@ var OaRepositorySourceResolver = class {
   enabled() { return true; }
 
   async buildCandidates(_item, ids) {
-    // Use the raw item URL, not the DOI-derived canonical URL.
-    const url = ids.itemUrl;
-    if (!url || !url.startsWith("http")) return [];
+    const candidates = [];
 
-    const domain = Utils.getDomain(url);
-    if (!domain) return [];
-
-    // Belt-and-suspenders: never follow aggregator URLs even if somehow
-    // ids.itemUrl escaped the aggregator filter in identifiers.mjs.
-    if (IdentifierExtractor._isAggregatorHost(domain)) {
-      Zotero.debug(`[OaRepositorySourceResolver] Skipping aggregator URL: ${domain}`);
-      return [];
+    // When a direct arXiv ID is known, produce a direct-pdf candidate at a
+    // slightly higher priority than the generic OA landing-page.  This is
+    // faster (one fewer HTTP round-trip) and more reliable: the arxiv.org PDF
+    // endpoint serves the file directly without any JS rendering or meta-tag
+    // parsing.  Works for both published papers with an arXiv preprint and
+    // pure preprints that have no DOI yet.
+    if (ids.arxivId) {
+      candidates.push({
+        sourceId: "oa-repository",
+        label: "arXiv",
+        url: `https://arxiv.org/pdf/${ids.arxivId}`,
+        kind: "direct-pdf",
+        priority: 86
+      });
     }
 
-    if (!ZotFetch.isSafeOAHost(domain)) return [];
+    // Use the raw item URL, not the DOI-derived canonical URL.
+    const url = ids.itemUrl;
+    if (url && /^https?:\/\//i.test(url)) {
+      const domain = Utils.getDomain(url);
+      if (domain) {
+        // Belt-and-suspenders: never follow aggregator URLs even if somehow
+        // ids.itemUrl escaped the aggregator filter in identifiers.mjs.
+        if (IdentifierExtractor._isAggregatorHost(domain)) {
+          Zotero.debug(`[OaRepositorySourceResolver] Skipping aggregator URL: ${domain}`);
+        } else if (ZotFetch.isSafeOAHost(domain)) {
+          // Skip duplicate arxiv.org URL when a direct-pdf candidate was already
+          // added above — the landing-page is slower and provides no extra value.
+          const isArxivUrl = domain === "arxiv.org" || domain.endsWith(".arxiv.org");
+          if (!isArxivUrl || !ids.arxivId) {
+            candidates.push({
+              sourceId: "oa-repository",
+              label: "OA Repository",
+              url,
+              kind: _looksLikePdf(url) ? "direct-pdf" : "landing-page",
+              priority: 85
+            });
+          }
+        }
+      }
+    }
 
-    return [{
-      sourceId: "oa-repository",
-      label: "OA Repository",
-      url,
-      kind: _looksLikePdf(url) ? "direct-pdf" : "landing-page",
-      priority: 85
-    }];
+    return candidates;
   }
 };
 
@@ -569,7 +663,7 @@ var InstitutionalProxySourceResolver = class {
         const resp = await Zotero.HTTP.request("GET", s2url, {
           responseType: "json",
           timeout: 8000,
-          headers: { "User-Agent": "ZotFetch/1.2 (mailto:" + email + ")" }
+          headers: { "User-Agent": `ZotFetch/${ZotFetchPlugin?.version || "1.4"} (mailto:${email})` }
         });
         const pdfUrl = resp.response?.openAccessPdf?.url;
         if (pdfUrl) {

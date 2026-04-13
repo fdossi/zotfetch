@@ -2,7 +2,7 @@
 
 [![DOI](https://zenodo.org/badge/1186582529.svg)](https://doi.org/10.5281/zenodo.19149482)
 
-**Author:** Fabio Dossi &nbsp;|&nbsp; **Version:** 1.4.3 &nbsp;|&nbsp; [📖 User Manual (Wiki)](https://github.com/fdossi/zotfetch/wiki)
+**Author:** Fabio Dossi &nbsp;|&nbsp; **Version:** 1.5.0 &nbsp;|&nbsp; [📖 User Manual (Wiki)](https://github.com/fdossi/zotfetch/wiki)
 
 **ZotFetch** is a [Zotero 8](https://www.zotero.org/) plugin that automatically downloads PDFs for multiple library items in a single operation. It uses a modular two-stage pipeline — **source resolution** then **PDF extraction** — so that landing pages from publishers, proxies, and repositories are correctly resolved to their actual PDF URL before import.
 
@@ -11,8 +11,9 @@
 ## Features
 
 - **Two-stage pipeline**: SourceResolver → PDFResolver → AttachmentImporter. Landing pages are never accidentally imported as PDFs.
-- **Multi-source download**: Native OA → Unpaywall → Semantic Scholar → OpenAlex → OA Repository → DOI Landing → Institutional Proxy → CAPES
-- **HTML-to-PDF extraction**: Publisher landing pages (Springer, Nature, Wiley, Taylor & Francis, ACS, IEEE, MDPI, Frontiers, Elsevier/ScienceDirect, SciELO.br) are parsed with a DOM resolver or a generic HTML extractor (citation_pdf_url meta, `<link rel="alternate">`, `<iframe>`, `<embed>`, and PDF anchors)
+- **Multi-source download**: Native OA → Unpaywall → Semantic Scholar → OpenAlex → Europe PMC → CORE → OA Repository (+ arXiv direct-pdf) → Zotero Native DOI → DOI Landing → Institutional Proxy → CAPES
+- **PMCID support**: extracts `PMCID: PMCxxxxxxx` from item metadata for an instant Europe PMC fast path — no API call needed
+- **HTML-to-PDF extraction**: publisher-specific rules (Springer, Nature, Wiley, Taylor & Francis, ACS, Royal Society of Chemistry, SAGE, Oxford University Press, IEEE, MDPI, Frontiers, Elsevier/ScienceDirect, SciELO.br), a generic HTML extractor, or a **Gecko hidden browser** that automatically solves Cloudflare/Akamai JS challenges
 - **Fast Mode**: Two-pass strategy — lightweight open-access sources first, institutional fallbacks only for unresolved items
 - **Ultra Fast Mode**: Single-pass, maximum speed, prioritises open-access sources
 - **Adaptive rate limiting**: Per-domain request spacing with exponential backoff on failures
@@ -45,7 +46,7 @@ cd autoPDFdownloader
 python build.py --clean
 ```
 
-This creates `zotfetch-1.4.3.xpi`. Install it via the steps above.
+This creates `zotfetch-X.Y.Z.xpi`. Install it via the steps above.
 
 ---
 
@@ -70,12 +71,15 @@ ZotFetch tries sources in this order of priority:
 | Priority | Source | Notes |
 |---|---|---|
 | 110 | **Native OA** | Zotero's built-in open-access finder |
-| 100 | **Unpaywall** | Free legal OA PDF lookup (requires email) |
-| 95 | **Semantic Scholar** | Graph API open-access PDF field |
-| 90 | **OpenAlex** | best_oa_location PDF URL |
-| 85 | **OA Repository** | Item URL when host is in the safe OA list |
+| 100 | **Unpaywall** | Free legal OA PDF lookup (requires email). Collects direct PDF URLs and OA landing pages across all OA locations. |
+| 95 | **Semantic Scholar** | Graph API `openAccessPdf` field; falls back to arXiv direct-pdf when S2 knows the arXiv ID |
+| 90 | **OpenAlex** | `best_oa_location` PDF URL or OA landing page |
+| 89 | **Europe PMC** | Biomedical papers. Instant direct URL when PMCID is known; API search via PMID or DOI otherwise |
+| 88 | **CORE** | [core.ac.uk](https://core.ac.uk/) — 234M+ institutional repository records. Free key recommended. |
+| 86–85 | **OA Repository** | Direct arXiv PDF when arXiv ID is known (86); item URL when host is in the safe OA list (85) |
+| 83 | **Zotero Native (DOI)** | Zotero's translator-based DOI resolver. On institutional IP/VPN, resolves paywalled PDFs automatically. |
 | 80 | **DOI Landing** | Publisher page via doi.org (HTML→PDF extraction) |
-| 75 | **Institutional Proxy** | DOI routed through your proxy; also routes S2 PDF links |
+| 75–72 | **Institutional Proxy** | DOI routed through your proxy; also routes Semantic Scholar PDF URLs through the proxy |
 | 70 | **CAPES** | Brazilian CAPES portal or custom DOI proxy URL |
 
 In **Fast Mode**, sources 110–75 run in Pass 1; unresolved items proceed to Pass 2 (CAPES and institutional fallbacks). In **Ultra Fast Mode**, all sources run in a single pass.
@@ -86,9 +90,11 @@ In **Fast Mode**, sources 110–75 run in Pass 1; unresolved items proceed to Pa
 
 When a source returns a landing page URL (not a direct PDF), ZotFetch tries to find the real PDF link in this order:
 
-1. **Publisher-specific rule** (Springer, Nature, Wiley, Taylor & Francis, ACS, IEEE, MDPI, Frontiers, Elsevier/ScienceDirect, SciELO.br)
+1. **Publisher-specific rule** (Springer, Nature, Wiley, Taylor & Francis, ACS, Royal Society of Chemistry, SAGE, Oxford University Press, IEEE, MDPI, Frontiers, Elsevier/ScienceDirect, SciELO.br)
 2. **Generic HTML extractor**: `<meta name="citation_pdf_url">`, `<link rel="alternate" type="application/pdf">`, `<iframe>` / `<embed>` / `<object>` with PDF src, `<a>` links to `.pdf` or with "Download PDF" text
-3. **Direct validation**: HEAD request to confirm Content-Type: application/pdf before importing
+3. **Gecko hidden browser** (`Zotero.HTTP.processDocuments`): for URLs where steps 1–2 failed, loads the page in a full hidden Firefox engine. Automatically passes Cloudflare "Just a moment…" and Akamai Bot Manager JS challenges. Publisher-specific rules and generic extraction are then re-applied on the fully rendered DOM.
+
+Each candidate URL is validated by a HEAD request confirming `Content-Type: application/pdf` before the file is imported.
 
 ---
 
@@ -141,14 +147,15 @@ ZotFetch supports all common proxy URL patterns:
 ```
 processItem()
 ├─ IdentifierExtractor.fromItem()          (identifiers.mjs)
-│    extracts DOI, arXiv ID, PMID, URL, title, year, firstAuthor
+│    extracts DOI, arXiv ID, PMID, PMCID, URL, title, year, firstAuthor
 ├─ SourceResolver[].buildCandidates()      (source-resolvers.mjs)
 │    returns SourceCandidate[] sorted by priority
 └─ for each candidate:
      PDFResolver[].resolve()               (pdf-resolvers.mjs)
      ├─ DirectPDFResolver                  HEAD/GET, confirm Content-Type: application/pdf
      ├─ PublisherPatternResolver           publisher-specific DOM rules
-     └─ HtmlLandingPDFResolver             generic meta/link/iframe/anchor extraction
+     ├─ HtmlLandingPDFResolver             generic meta/link/iframe/anchor extraction
+     └─ HiddenBrowserPDFResolver           Gecko JS engine (Cloudflare/Akamai challenges)
      AttachmentImporter.importResolvedPdf() (importer.mjs)
 ```
 
@@ -190,7 +197,7 @@ ZotFetch tracks request history per domain:
 ## Known Limitations
 
 - **Captcha-blocked sessions**: When a publisher serves a captcha, use **ZotFetch ▶ Retry After Auth** to open the URL in your browser, solve the captcha, then retry.
-- **JavaScript-rendered publisher pages**: Some publishers (e.g. ScienceDirect app) require JS to load the PDF link. The plugin uses a JS extraction heuristic from inline script blocks as a best effort, but may miss some.
+- **JavaScript-rendered publisher pages**: ZotFetch now includes a Gecko hidden browser (`HiddenBrowserPDFResolver`) as the last-resort resolver. It runs a full Firefox engine, automatically passing Cloudflare "Just a moment…" and Akamai Bot Manager JS challenges. Only human-verification CAPTCHAs (reCAPTCHA checkbox, hCaptcha image grids) still require manual intervention via **Retry After Auth**.
 - **Paywalled content without proxy**: Without an institutional proxy configured, ZotFetch can only retrieve freely available (OA) versions of paywalled articles.
 
 ---

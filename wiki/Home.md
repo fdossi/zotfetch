@@ -2,7 +2,7 @@
 
 **ZotFetch** is a Zotero 8 plugin that automatically downloads PDFs for entire library selections using a smart multi-source pipeline. This manual covers everything you need to start downloading PDFs and configuring institutional access.
 
-> **Version:** 1.4.3 · **Author:** Fabio Dossi · **License:** MIT  
+> **Version:** 1.5.0 · **Author:** Fabio Dossi · **License:** MIT  
 > **Repository:** https://github.com/fdossi/zotfetch
 
 ---
@@ -102,7 +102,13 @@ ZotFetch tries sources in priority order. As soon as one succeeds, it imports th
 | 70 | **CAPES** | CAPES Periódicos portal (Brazil). Only in Batch Download 2nd pass and Retry. |
 
 
-When a source returns a **landing page** (not a direct PDF URL), ZotFetch parses the HTML using publisher-specific rules for Springer, Nature, Wiley, Taylor & Francis, ACS, IEEE, MDPI, Frontiers, Elsevier/ScienceDirect, and SciELO.br — with a generic extractor (`citation_pdf_url` meta tag, `<link rel="alternate">`, iframe/embed, PDF anchors) as a universal fallback.
+When a source returns a **landing page** (not a direct PDF URL), ZotFetch tries to resolve it in this order:
+
+1. **Publisher-specific rule** — Springer, Nature, Wiley, Taylor & Francis, ACS, Royal Society of Chemistry, SAGE, Oxford University Press, IEEE, MDPI, Frontiers, Elsevier/ScienceDirect, SciELO.br
+2. **Generic HTML extractor** — `citation_pdf_url` meta tag, `<link rel="alternate">`, iframe/embed, PDF anchors
+3. **Gecko hidden browser** (`Zotero.HTTP.processDocuments`) — for pages where steps&nbsp;1–2 failed, loads the page in a full hidden Firefox engine. Cloudflare “Just a moment…” and Akamai Bot Manager JS challenges are solved automatically. Publisher rules and generic extractor are re-applied on the fully rendered DOM.
+
+Each found URL is validated (HEAD request, `Content-Type: application/pdf`) before import.
 
 ---
 

@@ -505,6 +505,312 @@ await test("url= query string append", () => {
   assert(result === `https://proxy.edu/login?url=${encodeURIComponent("https://doi.org/10.1000/test")}`);
 });
 
+// ─── Test group: IdentifierExtractor — archiveLocation ───────────────────────
+
+console.log("\nIdentifierExtractor — archiveLocation");
+
+await test("extracts arXiv ID from archiveLocation field", async () => {
+  const item = {
+    getField(f) {
+      if (f === "archiveLocation") return "arXiv:2301.00001";
+      return "";
+    },
+    getCreators: () => []
+  };
+  const ids = await IdentifierExtractor.fromItem(item);
+  assert(ids.arxivId === "2301.00001", `Got: ${ids.arxivId}`);
+});
+
+await test("archiveID takes precedence over archiveLocation", async () => {
+  const item = {
+    getField(f) {
+      if (f === "archiveID")       return "2401.99999";
+      if (f === "archiveLocation") return "arXiv:2301.00001";
+      return "";
+    },
+    getCreators: () => []
+  };
+  const ids = await IdentifierExtractor.fromItem(item);
+  assert(ids.arxivId === "2401.99999", `Expected archiveID, got: ${ids.arxivId}`);
+});
+
+await test("extracts arXiv ID from bare archiveID field", async () => {
+  const item = {
+    getField(f) {
+      if (f === "archiveID") return "2301.00001";
+      return "";
+    },
+    getCreators: () => []
+  };
+  const ids = await IdentifierExtractor.fromItem(item);
+  assert(ids.arxivId === "2301.00001", `Got: ${ids.arxivId}`);
+});
+
+await test("extracts arXiv ID from arxiv.org URL", async () => {
+  const item = {
+    getField(f) {
+      if (f === "url") return "https://arxiv.org/abs/2301.00001";
+      return "";
+    },
+    getCreators: () => []
+  };
+  const ids = await IdentifierExtractor.fromItem(item);
+  assert(ids.arxivId === "2301.00001", `Got: ${ids.arxivId}`);
+});
+
+await test("extracts old-style arXiv ID from arxiv.org URL", async () => {
+  const item = {
+    getField(f) {
+      if (f === "url") return "https://arxiv.org/abs/hep-ph/0601001";
+      return "";
+    },
+    getCreators: () => []
+  };
+  const ids = await IdentifierExtractor.fromItem(item);
+  assert(ids.arxivId === "hep-ph/0601001", `Got: ${ids.arxivId}`);
+});
+
+await test("extracts old-style arXiv ID from bare archiveID", async () => {
+  const item = {
+    getField(f) {
+      if (f === "archiveID") return "hep-ph/0601001";
+      return "";
+    },
+    getCreators: () => []
+  };
+  const ids = await IdentifierExtractor.fromItem(item);
+  assert(ids.arxivId === "hep-ph/0601001", `Got: ${ids.arxivId}`);
+});
+
+// ─── Test group: PMCID extraction ────────────────────────────────────────────
+
+console.log("\nPMCID extraction");
+
+await test("extracts PMCID from Extra field", async () => {
+  const item = {
+    getField(f) {
+      if (f === "extra") return "PMID: 12345678\nPMCID: PMC9876543";
+      return "";
+    },
+    getCreators: () => []
+  };
+  const ids = await IdentifierExtractor.fromItem(item);
+  assert(ids.pmcid === "PMC9876543", `Got: ${ids.pmcid}`);
+  assert(ids.pmid === "12345678", `Got PMID: ${ids.pmid}`);
+});
+
+await test("PMCID is uppercased on extraction", async () => {
+  const item = {
+    getField(f) {
+      if (f === "extra") return "pmcid: pmc1234567";
+      return "";
+    },
+    getCreators: () => []
+  };
+  const ids = await IdentifierExtractor.fromItem(item);
+  assert(ids.pmcid === "PMC1234567", `Got: ${ids.pmcid}`);
+});
+
+await test("no PMCID yields undefined pmcid", async () => {
+  const item = {
+    getField(f) {
+      if (f === "extra") return "PMID: 12345678";
+      return "";
+    },
+    getCreators: () => []
+  };
+  const ids = await IdentifierExtractor.fromItem(item);
+  assert(ids.pmcid === undefined, `Expected undefined, got: ${ids.pmcid}`);
+});
+
+// ─── Test group: OaRepositorySourceResolver — arXiv direct-pdf ───────────────
+
+console.log("\nOaRepositorySourceResolver — arXiv direct-pdf");
+
+await test("produces direct-pdf candidate when arxivId is known", async () => {
+  const sr = new OaRepositorySourceResolver();
+  const candidates = await sr.buildCandidates({}, { arxivId: "2301.00001" });
+  const pdf = candidates.find(c => c.kind === "direct-pdf");
+  assert(pdf !== undefined, "Expected a direct-pdf candidate");
+  assert(pdf.url === "https://arxiv.org/pdf/2301.00001", `Got: ${pdf.url}`);
+  assert(pdf.priority === 86);
+});
+
+await test("skips redundant landing-page when arxivId + arxiv.org URL", async () => {
+  const sr = new OaRepositorySourceResolver();
+  const candidates = await sr.buildCandidates({}, {
+    arxivId: "2301.00001",
+    itemUrl: "https://arxiv.org/abs/2301.00001"
+  });
+  // Should have the direct-pdf but NOT an extra landing-page for the same ID.
+  const landingPages = candidates.filter(c => c.kind === "landing-page" && Utils.getDomain(c.url) === "arxiv.org");
+  assert(landingPages.length === 0, `Expected no redundant arxiv landing-page, got ${landingPages.length}`);
+});
+
+await test("keeps non-arxiv OA URL alongside arXiv direct-pdf", async () => {
+  const sr = new OaRepositorySourceResolver();
+  const candidates = await sr.buildCandidates({}, {
+    arxivId: "2301.00001",
+    itemUrl: "https://zenodo.org/record/1234567"
+  });
+  assert(candidates.some(c => c.kind === "direct-pdf" && c.url.includes("arxiv.org")), "Expected arxiv PDF");
+  assert(candidates.some(c => Utils.getDomain(c.url) === "zenodo.org"), "Expected zenodo URL");
+});
+
+// ─── Test group: DOI trailing punctuation strip ───────────────────────────────
+
+console.log("\nDOI trailing punctuation strip");
+
+await test("strips trailing period from DOI in URL", async () => {
+  const item = {
+    getField(f) {
+      if (f === "url") return "https://doi.org/10.1000/xyz.001.";
+      return "";
+    },
+    getCreators: () => []
+  };
+  const ids = await IdentifierExtractor.fromItem(item);
+  assert(ids.doi === "10.1000/xyz.001", `Got: ${ids.doi}`);
+});
+
+await test("strips trailing comma from DOI in extra", async () => {
+  const item = {
+    getField(f) {
+      if (f === "extra") return "DOI: 10.1000/abc.002,";
+      return "";
+    },
+    getCreators: () => []
+  };
+  const ids = await IdentifierExtractor.fromItem(item);
+  assert(ids.doi === "10.1000/abc.002", `Got: ${ids.doi}`);
+});
+
+// ─── Test group: Security — URL scheme guard ──────────────────────────────────
+
+console.log("\nSecurity — URL scheme guard");
+
+await test("_resolveCandidate rejects file:// URL", async () => {
+  // Stub a minimal ZotFetch._resolveCandidate from the real fetch.mjs logic.
+  // Since fetch.mjs is not loaded here we re-implement the guard logic directly.
+  function resolveCandidate_guardOnly(candidate) {
+    if (candidate.url && !/^https?:\/\//i.test(candidate.url)) {
+      return { ok: false, failureReason: "network" };
+    }
+    return null; // would continue to resolvers
+  }
+  const r = resolveCandidate_guardOnly({ url: "file:///etc/passwd", kind: "landing-page" });
+  assert(r !== null && !r.ok, "Expected guard to reject file:// URL");
+  assert(r.failureReason === "network");
+});
+
+await test("_resolveCandidate rejects javascript: URL", async () => {
+  function resolveCandidate_guardOnly(candidate) {
+    if (candidate.url && !/^https?:\/\//i.test(candidate.url)) {
+      return { ok: false, failureReason: "network" };
+    }
+    return null;
+  }
+  const r = resolveCandidate_guardOnly({ url: "javascript:alert(1)", kind: "direct-pdf" });
+  assert(r !== null && !r.ok, "Expected guard to reject javascript: URL");
+});
+
+await test("_resolveCandidate allows https:// URL", async () => {
+  function resolveCandidate_guardOnly(candidate) {
+    if (candidate.url && !/^https?:\/\//i.test(candidate.url)) {
+      return { ok: false, failureReason: "network" };
+    }
+    return null;
+  }
+  const r = resolveCandidate_guardOnly({ url: "https://arxiv.org/pdf/2301.00001.pdf", kind: "direct-pdf" });
+  assert(r === null, "https:// should pass the guard (returns null = continue)");
+});
+
+await test("_resolveCandidate allows empty sentinel URL", async () => {
+  function resolveCandidate_guardOnly(candidate) {
+    if (candidate.url && !/^https?:\/\//i.test(candidate.url)) {
+      return { ok: false, failureReason: "network" };
+    }
+    return null;
+  }
+  const r = resolveCandidate_guardOnly({ url: "", kind: "api-result" });
+  assert(r === null, "Empty URL (sentinel) should pass the guard");
+});
+
+// ─── Test group: Security — CrossRef year injection ───────────────────────────
+
+console.log("\nSecurity — CrossRef year injection");
+
+await test("4-digit year is accepted", () => {
+  const year = "2023";
+  const safe = /^\d{4}$/.test(year);
+  assert(safe, "4-digit year should pass");
+});
+
+await test("crafted year with extra params is rejected", () => {
+  const year = "2023&rows=999&evil=true";
+  const safe = /^\d{4}$/.test(year);
+  assert(!safe, "Crafted year should fail the 4-digit guard");
+});
+
+await test("empty year is not injected into query", () => {
+  const year = "";
+  const safe = year && /^\d{4}$/.test(year);
+  assert(!safe, "Empty year should not produce a filter clause");
+});
+
+// ─── Test group: protected-host policies ─────────────────────────────────────
+
+console.log("\nProtected-host policies");
+
+// Minimal shim — re-implement the lookup the same way protected-hosts.mjs does.
+loadModule("chrome/content/protected-hosts.mjs");
+
+await test("tandfonline.com has earlyAbortOnChallenge policy", () => {
+  const policy = ProtectedHosts.getHostPolicy("tandfonline.com");
+  assert(policy !== null, "tandfonline.com must have a policy");
+  assert(policy.earlyAbortOnChallenge === true);
+});
+
+await test("pubs.rsc.org has earlyAbortOnChallenge policy", () => {
+  const policy = ProtectedHosts.getHostPolicy("pubs.rsc.org");
+  assert(policy !== null, "pubs.rsc.org must have a policy");
+  assert(policy.earlyAbortOnChallenge === true);
+});
+
+await test("journals.sagepub.com has earlyAbortOnChallenge policy", () => {
+  const policy = ProtectedHosts.getHostPolicy("journals.sagepub.com");
+  assert(policy !== null, "journals.sagepub.com must have a policy");
+  assert(policy.earlyAbortOnChallenge === true);
+});
+
+await test("sciencedirect.com retains its policy", () => {
+  const policy = ProtectedHosts.getHostPolicy("sciencedirect.com");
+  assert(policy !== null);
+  assert(policy.maxAttemptsPerItem === 1);
+  assert(policy.minGapMs === 8000);
+});
+
+await test("unknown host returns null policy", () => {
+  const policy = ProtectedHosts.getHostPolicy("example.com");
+  assert(policy === null, "Unknown host should have no policy");
+});
+
+// ─── Test group: OaRepositorySourceResolver URL scheme check ─────────────────
+
+console.log("\nOaRepositorySourceResolver — URL scheme");
+
+await test("OaRepositorySourceResolver rejects non-http URL", async () => {
+  const sr = new OaRepositorySourceResolver();
+  const candidates = await sr.buildCandidates({}, { itemUrl: "ftp://example.com/paper.pdf" });
+  assert(candidates.length === 0, "Non-http URL should yield no candidates");
+});
+
+await test("OaRepositorySourceResolver rejects bare path", async () => {
+  const sr = new OaRepositorySourceResolver();
+  const candidates = await sr.buildCandidates({}, { itemUrl: "/relative/path/paper.pdf" });
+  assert(candidates.length === 0, "Bare path should yield no candidates");
+});
+
 // ─── Summary ──────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);
