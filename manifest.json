@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "name": "ZotFetch",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "author": "Fabio Dossi",
-  "description": "ZotFetch: Batch PDF downloader for Zotero 8. Multi-source pipeline with HTML-to-PDF extraction, Unpaywall, Semantic Scholar, OpenAlex, institutional proxy, and CAPES fallback.",
+  "description": "ZotFetch: Batch PDF downloader for Zotero 8. Multi-source pipeline: Unpaywall, Semantic Scholar, OpenAlex, CORE, Europe PMC, Internet Archive (Fatcat), Paperity, OA.mg, institutional proxy, and CAPES fallback.",
   "icons": {
     "48": "chrome/content/zotlogo.png"
   },

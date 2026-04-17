@@ -497,6 +497,209 @@ var EuropePmcSourceResolver = class {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// InternetArchiveSourceResolver
+// Queries the Fatcat API (fatcat.wiki) — the bibliographic backbone of
+// Internet Archive Scholar — to retrieve preserved PDF copies indexed from
+// institutional repositories, preprint servers, and OA journals.
+//
+// Fatcat tracks 250M+ scholarly releases and their associated file objects,
+// each with one or more download URLs (repository mirrors, Wayback Machine
+// captures, etc.).  The public API requires no key; polite limit ~5 req/sec.
+// ─────────────────────────────────────────────────────────────────────────────
+var InternetArchiveSourceResolver = class {
+  constructor() { this.id = "internet-archive"; }
+
+  enabled() { return true; }
+
+  async buildCandidates(_item, ids) {
+    if (!ids.doi) return [];
+
+    const domain = "api.fatcat.wiki";
+    if (ZotFetch.cooldown.isDomainCoolingDown(domain)) return [];
+    await ZotFetch.cooldown.honorDomainGap(domain, ZotFetchPrefs);
+
+    try {
+      const url = `https://api.fatcat.wiki/v0/release/lookup?doi=${encodeURIComponent(ids.doi)}&expand=files`;
+      const resp = await Zotero.HTTP.request("GET", url, {
+        responseType: "json",
+        timeout: 12000,
+        headers: {
+          Accept: "application/json",
+          "User-Agent": `ZotFetch/${ZotFetchPlugin?.version || "1.5"} (mailto:zotfetch@gmail.com)`
+        }
+      });
+
+      const files = resp.response?.files;
+      if (!Array.isArray(files) || !files.length) {
+        ZotFetch.cooldown.markDomainNonCaptcha(domain);
+        return [];
+      }
+
+      const candidates = [];
+      const seen = new Set();
+      let priority = 84;
+
+      for (const file of files) {
+        if (!Array.isArray(file.urls)) continue;
+        // Sort: repository > archive > webarchive; skip non-http(s) and dweb.
+        const sorted = file.urls.slice().sort((a, b) => {
+          const order = { repository: 0, archive: 1, publisher: 2, webarchive: 3 };
+          return (order[a.rel] ?? 9) - (order[b.rel] ?? 9);
+        });
+        for (const entry of sorted) {
+          const fileUrl = entry?.url;
+          if (!fileUrl || seen.has(fileUrl)) continue;
+          // Block non-http(s) schemes (dweb, ipfs, dat, etc.) — they cannot be
+          // fetched by Zotero.HTTP.request and must not reach the resolver chain.
+          if (!/^https?:\/\//i.test(fileUrl)) continue;
+          // Skip publisher copies: they are almost always paywalled and will be
+          // tried by DoiLandingSourceResolver anyway.
+          if (entry.rel === "publisher") continue;
+          seen.add(fileUrl);
+          candidates.push({
+            sourceId: "internet-archive",
+            label: "Internet Archive",
+            url: fileUrl,
+            kind: _looksLikePdf(fileUrl) ? "direct-pdf" : "landing-page",
+            // Wayback Machine captures get a slightly lower priority than direct
+            // repository mirrors since they may be rate-limited or stale.
+            priority: entry.rel === "webarchive" ? priority - 2 : priority--
+          });
+        }
+      }
+
+      if (!candidates.length) {
+        ZotFetch.cooldown.markDomainNonCaptcha(domain);
+        return [];
+      }
+
+      ZotFetch.cooldown.markDomainSuccess(domain);
+      return candidates;
+
+    } catch (error) {
+      if (Utils.isCaptchaError(error)) {
+        ZotFetch.cooldown.markDomainCaptcha(domain);
+      } else {
+        ZotFetch.cooldown.markDomainNonCaptcha(domain);
+      }
+      Zotero.logError(error);
+      return [];
+    }
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PaperitySourceResolver
+// Queries the Paperity.org API — an aggregator of peer-reviewed OA journal
+// articles covering ~1 600 fully-OA journals with direct PDF links.
+// Complements Unpaywall/CORE by providing a second independently-indexed copy
+// with a pre-validated direct-PDF URL, reducing HTML-landing round-trips.
+// No API key required; key-less rate limit is generous for batch use.
+// ─────────────────────────────────────────────────────────────────────────────
+var PaperitySourceResolver = class {
+  constructor() { this.id = "paperity"; }
+
+  enabled() { return true; }
+
+  async buildCandidates(_item, ids) {
+    if (!ids.doi) return [];
+
+    const domain = "paperity.org";
+    if (ZotFetch.cooldown.isDomainCoolingDown(domain)) return [];
+    await ZotFetch.cooldown.honorDomainGap(domain, ZotFetchPrefs);
+
+    try {
+      const url = `https://paperity.org/api/0.1/paper/doi/?doi=${encodeURIComponent(ids.doi)}&format=json`;
+      const resp = await Zotero.HTTP.request("GET", url, {
+        responseType: "json",
+        timeout: 10000,
+        headers: { Accept: "application/json" }
+      });
+
+      const objects = resp.response?.objects;
+      if (!Array.isArray(objects) || !objects.length) {
+        ZotFetch.cooldown.markDomainNonCaptcha(domain);
+        return [];
+      }
+
+      // Paperity returns a list; prefer the first entry with a pdfUrl.
+      const candidates = [];
+      const seen = new Set();
+      for (const paper of objects) {
+        const pdfUrl = paper.pdfUrl || paper.pdf_url || paper.urlPdf || null;
+        if (!pdfUrl || seen.has(pdfUrl)) continue;
+        if (!/^https?:\/\//i.test(pdfUrl)) continue;
+        seen.add(pdfUrl);
+        candidates.push({
+          sourceId: "paperity",
+          label: "Paperity",
+          url: pdfUrl,
+          kind: _looksLikePdf(pdfUrl) ? "direct-pdf" : "landing-page",
+          priority: 81,
+          headers: { Referer: "https://paperity.org/" }
+        });
+      }
+
+      if (!candidates.length) {
+        ZotFetch.cooldown.markDomainNonCaptcha(domain);
+        return [];
+      }
+
+      ZotFetch.cooldown.markDomainSuccess(domain);
+      return candidates;
+
+    } catch (error) {
+      if (Utils.isCaptchaError(error)) {
+        ZotFetch.cooldown.markDomainCaptcha(domain);
+      } else {
+        ZotFetch.cooldown.markDomainNonCaptcha(domain);
+      }
+      Zotero.logError(error);
+      return [];
+    }
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OaMgSourceResolver
+// Treats oa.mg as a last-chance OA landing page.  OA.mg aggregates open-
+// access links across Unpaywall, Semantic Scholar, CORE, and other sources
+// into a unified page keyed by DOI.  Because it re-queries the same upstream
+// sources ZotFetch already tries, it is placed at a lower priority and used
+// only when every other resolver has failed.
+//
+// The landing page is resolved by HtmlLandingPDFResolver / HiddenBrowser,
+// which extract the download button href.  No API key required.
+// ─────────────────────────────────────────────────────────────────────────────
+var OaMgSourceResolver = class {
+  constructor() { this.id = "oamg"; }
+
+  enabled() { return true; }
+
+  async buildCandidates(_item, ids) {
+    if (!ids.doi) return [];
+
+    // oa.mg URL format: https://oa.mg/work/<DOI>
+    // Use encodeURI (not encodeURIComponent) so the '/' in DOI path segments
+    // is preserved — oa.mg expects https://oa.mg/work/10.1016/j.cell.2020
+    // not https://oa.mg/work/10.1016%2Fj.cell.2020.
+    const landingUrl = `https://oa.mg/work/${encodeURI(ids.doi)}`;
+
+    return [{
+      sourceId: "oamg",
+      label: "OA.mg",
+      url: landingUrl,
+      kind: "landing-page",
+      priority: 73,
+      headers: {
+        Referer: "https://oa.mg/",
+        ...Utils.getStealthHeaders()
+      }
+    }];
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // OaRepositorySourceResolver
 // Uses the raw item URL when it points to a known safe OA host (e.g. arXiv,
 // PubMed Central, Zenodo). Reads ids.itemUrl — the unmodified Zotero URL field
@@ -726,6 +929,9 @@ this.SemanticScholarSourceResolver = SemanticScholarSourceResolver;
 this.OpenAlexSourceResolver = OpenAlexSourceResolver;
 this.CoreSourceResolver = CoreSourceResolver;
 this.EuropePmcSourceResolver = EuropePmcSourceResolver;
+this.InternetArchiveSourceResolver = InternetArchiveSourceResolver;
+this.PaperitySourceResolver = PaperitySourceResolver;
+this.OaMgSourceResolver = OaMgSourceResolver;
 this.OaRepositorySourceResolver = OaRepositorySourceResolver;
 this.NativeDoiSourceResolver = NativeDoiSourceResolver;
 this.DoiLandingSourceResolver = DoiLandingSourceResolver;

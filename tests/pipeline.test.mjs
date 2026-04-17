@@ -70,6 +70,10 @@ globalThis.CooldownManager = class {
   async sleepWithJitter() {}
 };
 
+// ZotFetchPlugin is defined as a global in Zotero but absent in test env.
+// Set to null so ZotFetchPlugin?.version safely returns undefined in resolvers.
+globalThis.ZotFetchPlugin = null;
+
 // Stub ZotFetch — partially filled in after real fetch.mjs is loaded
 globalThis.ZotFetch = {
   cooldown: new CooldownManager(),
@@ -322,7 +326,172 @@ await test("candidate priority ordering: native > unpaywall > oa-repo > doi-land
   assert(sorted[1].priority === 100, "unpaywall should be second");
 });
 
-// ─── Test group: PDFResolvers ──────────────────────────────────────────────────
+await test("InternetArchiveSourceResolver: returns repository PDF candidates", async () => {
+  mockHttp({
+    "https://api.fatcat.wiki/v0/release/lookup": () => ({
+      response: {
+        files: [
+          {
+            urls: [
+              { rel: "repository", url: "https://repository.example.edu/bitstream/paper.pdf" },
+              { rel: "webarchive", url: "https://web.archive.org/web/2020/https://example.com/paper.pdf" }
+            ]
+          }
+        ]
+      }
+    })
+  });
+  const sr = new InternetArchiveSourceResolver();
+  const candidates = await sr.buildCandidates({}, { doi: "10.1000/test" });
+  assert(candidates.length >= 1, "Expected at least one candidate");
+  const repo = candidates.find(c => c.url.includes("repository.example.edu"));
+  assert(repo !== undefined, "Expected repository candidate");
+  assert(repo.kind === "direct-pdf", `Expected direct-pdf for .pdf URL, got ${repo.kind}`);
+  const web = candidates.find(c => c.url.includes("web.archive.org"));
+  assert(web !== undefined, "Expected webarchive candidate");
+  // Repository copy must be higher priority than webarchive copy.
+  assert(repo.priority > web.priority, `repo(${repo.priority}) should outrank webarchive(${web.priority})`);
+});
+
+await test("InternetArchiveSourceResolver: returns empty when no DOI", async () => {
+  const sr = new InternetArchiveSourceResolver();
+  const candidates = await sr.buildCandidates({}, {});
+  assert(candidates.length === 0, "No candidates without DOI");
+});
+
+await test("InternetArchiveSourceResolver: blocks non-http(s) dweb URLs", async () => {
+  mockHttp({
+    "https://api.fatcat.wiki/v0/release/lookup": () => ({
+      response: {
+        files: [
+          {
+            urls: [
+              { rel: "dweb", url: "dweb:/ipfs/QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco" },
+              { rel: "repository", url: "https://repo.example.edu/paper.pdf" }
+            ]
+          }
+        ]
+      }
+    })
+  });
+  const sr = new InternetArchiveSourceResolver();
+  const candidates = await sr.buildCandidates({}, { doi: "10.1000/test" });
+  const dweb = candidates.find(c => c.url.startsWith("dweb:"));
+  assert(dweb === undefined, "dweb:// URL must be blocked");
+  assert(candidates.length === 1, "Only the https repository URL should be returned");
+});
+
+await test("InternetArchiveSourceResolver: skips publisher-rel entries", async () => {
+  mockHttp({
+    "https://api.fatcat.wiki/v0/release/lookup": () => ({
+      response: {
+        files: [
+          {
+            urls: [
+              { rel: "publisher", url: "https://onlinelibrary.wiley.com/doi/10.1000/test" },
+              { rel: "repository", url: "https://repo.example.edu/paper.pdf" }
+            ]
+          }
+        ]
+      }
+    })
+  });
+  const sr = new InternetArchiveSourceResolver();
+  const candidates = await sr.buildCandidates({}, { doi: "10.1000/test" });
+  const publisher = candidates.find(c => c.url.includes("wiley.com"));
+  assert(publisher === undefined, "Publisher-rel entries should be skipped");
+});
+
+await test("InternetArchiveSourceResolver: returns empty when no files", async () => {
+  mockHttp({
+    "https://api.fatcat.wiki/v0/release/lookup": () => ({
+      response: { files: [] }
+    })
+  });
+  const sr = new InternetArchiveSourceResolver();
+  const candidates = await sr.buildCandidates({}, { doi: "10.1000/test" });
+  assert(candidates.length === 0, "No candidates when files array is empty");
+});
+
+await test("PaperitySourceResolver: returns direct-pdf candidate for pdfUrl", async () => {
+  mockHttp({
+    "https://paperity.org/api/0.1/paper/doi/": () => ({
+      response: {
+        objects: [
+          { pdfUrl: "https://paperity.org/p/12345/paper.pdf", title: "Test Paper" }
+        ]
+      }
+    })
+  });
+  const sr = new PaperitySourceResolver();
+  const candidates = await sr.buildCandidates({}, { doi: "10.1000/test" });
+  assert(candidates.length === 1, "Expected one candidate");
+  assert(candidates[0].kind === "direct-pdf", `Expected direct-pdf, got ${candidates[0].kind}`);
+  assert(candidates[0].url === "https://paperity.org/p/12345/paper.pdf");
+  assert(candidates[0].priority === 81);
+});
+
+await test("PaperitySourceResolver: returns empty when no DOI", async () => {
+  const sr = new PaperitySourceResolver();
+  const candidates = await sr.buildCandidates({}, {});
+  assert(candidates.length === 0, "No candidates without DOI");
+});
+
+await test("PaperitySourceResolver: returns empty when API returns no objects", async () => {
+  mockHttp({
+    "https://paperity.org/api/0.1/paper/doi/": () => ({
+      response: { objects: [] }
+    })
+  });
+  const sr = new PaperitySourceResolver();
+  const candidates = await sr.buildCandidates({}, { doi: "10.1000/test" });
+  assert(candidates.length === 0, "Empty objects array should yield no candidates");
+});
+
+await test("PaperitySourceResolver: blocks non-https pdfUrl", async () => {
+  mockHttp({
+    "https://paperity.org/api/0.1/paper/doi/": () => ({
+      response: {
+        objects: [
+          { pdfUrl: "ftp://paperity.org/p/12345/paper.pdf" }
+        ]
+      }
+    })
+  });
+  const sr = new PaperitySourceResolver();
+  const candidates = await sr.buildCandidates({}, { doi: "10.1000/test" });
+  assert(candidates.length === 0, "Non-https pdfUrl should be blocked");
+});
+
+await test("OaMgSourceResolver: builds correct oa.mg path URL with unencoded slashes", async () => {
+  const sr = new OaMgSourceResolver();
+  const candidates = await sr.buildCandidates({}, { doi: "10.1016/j.cell.2020.01.001" });
+  assert(candidates.length === 1, "Expected one candidate");
+  // Verify slashes in DOI are NOT percent-encoded
+  assert(candidates[0].url === "https://oa.mg/work/10.1016/j.cell.2020.01.001",
+    `DOI slashes must be preserved, got: ${candidates[0].url}`);
+  assert(candidates[0].kind === "landing-page");
+  assert(candidates[0].priority === 73);
+});
+
+await test("OaMgSourceResolver: returns empty when no DOI", async () => {
+  const sr = new OaMgSourceResolver();
+  const candidates = await sr.buildCandidates({}, {});
+  assert(candidates.length === 0, "No candidates without DOI");
+});
+
+await test("new resolver priority chain: IA(84) > Paperity(81) > OaMg(73) > CAPES(70)", () => {
+  const ia = { priority: 84 };
+  const paperity = { priority: 81 };
+  const oamg = { priority: 73 };
+  const capes = { priority: 70 };
+  const sorted = [capes, oamg, ia, paperity].sort((a, b) => b.priority - a.priority);
+  assert(sorted[0].priority === 84, `IA should be first, got ${sorted[0].priority}`);
+  assert(sorted[1].priority === 81, `Paperity second, got ${sorted[1].priority}`);
+  assert(sorted[2].priority === 73, `OA.mg third, got ${sorted[2].priority}`);
+  assert(sorted[3].priority === 70, `CAPES last, got ${sorted[3].priority}`);
+});
+
 
 console.log("\nPDFResolvers");
 

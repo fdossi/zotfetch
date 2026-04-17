@@ -38,7 +38,13 @@ const SAFE_OA_HOSTS = new Set([
   "biomedcentral.com",                 // BioMed Central / Springer Nature OA
   "f1000research.com",                 // F1000Research — fully OA
   "semanticscholar.org", "pdfs.semanticscholar.org",
-  "openalex.org"
+  "openalex.org",
+  // ── New OA sources ─────────────────────────────────────────────────────────
+  "scholar.archive.org",               // Internet Archive Scholar
+  "web.archive.org",                   // Wayback Machine (Fatcat webarchive URLs)
+  "fatcat.wiki", "api.fatcat.wiki",    // Fatcat bibliographic API
+  "paperity.org",                      // Paperity OA journal aggregator
+  "oa.mg"                              // OA.mg open-access aggregator
 ]);
 
 class ZotFetch {
@@ -115,6 +121,9 @@ class ZotFetch {
       openalex: 0,
       core: 0,
       europepmc: 0,
+      internetarchive: 0,
+      paperity: 0,
+      oamg: 0,
       oarepository: 0,
       institutional: 0,
       capes: 0,
@@ -204,7 +213,7 @@ class ZotFetch {
     }
 
     progress.setText(
-      `${this.getProgressStatus(stats, batch.length, batch.length, true)} Concluído: ${stats.downloaded} baixados (nativo ${stats.native}, Unpaywall ${stats.unpaywall}, S2 ${stats.semanticscholar}, OA ${stats.openalex}, CORE ${stats.core}, EPMC ${stats.europepmc}, Institucional ${stats.institutional}, CAPES ${stats.capes}${stats.oarepository ? `, OARepo ${stats.oarepository}` : ""}${stats.hiddenbrowser ? `, HiddenBrowser ${stats.hiddenbrowser}` : ""}) | pendentes ${stats.deferred} | DOI recuperado ${stats.doiRecovered} | não encontrado ${stats.notFound} | erros ${stats.failed} | captcha ${stats.captcha}`
+      `${this.getProgressStatus(stats, batch.length, batch.length, true)} Concluído: ${stats.downloaded} baixados (nativo ${stats.native}, Unpaywall ${stats.unpaywall}, S2 ${stats.semanticscholar}, OA ${stats.openalex}, CORE ${stats.core}, EPMC ${stats.europepmc}, Institucional ${stats.institutional}, CAPES ${stats.capes}${stats.internetarchive ? `, IA ${stats.internetarchive}` : ""}${stats.paperity ? `, Paperity ${stats.paperity}` : ""}${stats.oamg ? `, OA.mg ${stats.oamg}` : ""}${stats.oarepository ? `, OARepo ${stats.oarepository}` : ""}${stats.hiddenbrowser ? `, HiddenBrowser ${stats.hiddenbrowser}` : ""}) | pendentes ${stats.deferred} | DOI recuperado ${stats.doiRecovered} | não encontrado ${stats.notFound} | erros ${stats.failed} | captcha ${stats.captcha}`
     );
     progress.setProgress(100);
     progressWindow.startCloseTimer(10000);
@@ -482,6 +491,9 @@ class ZotFetch {
         else if (sid === "openalex")                   stats.openalex++;
         else if (sid === "core")                       stats.core++;
         else if (sid === "europepmc")                  stats.europepmc++;
+        else if (sid === "internet-archive")           stats.internetarchive++;
+        else if (sid === "paperity")                   stats.paperity++;
+        else if (sid === "oamg")                       stats.oamg++;
         else if (sid.startsWith("institutional-proxy")) stats.institutional++;
         else if (sid === "capes")                      stats.capes++;
         else                                           stats.oarepository++; // oa-repository / doi-landing / arXiv
@@ -514,9 +526,12 @@ class ZotFetch {
       new OpenAlexSourceResolver(),
       new EuropePmcSourceResolver(),
       new CoreSourceResolver(),
+      new InternetArchiveSourceResolver(),   // Fatcat API — archived repo copies (priority 84)
+      new PaperitySourceResolver(),          // Paperity OA journal aggregator  (priority 81)
       new OaRepositorySourceResolver(),
-      new NativeDoiSourceResolver(),    // Zotero Connector-like: translator + proxy
-      new DoiLandingSourceResolver(),   // fallback HTML extraction
+      new NativeDoiSourceResolver(),         // Zotero Connector-like: translator + proxy
+      new DoiLandingSourceResolver(),        // fallback HTML extraction
+      new OaMgSourceResolver(),              // OA.mg aggregator landing page    (priority 73)
       new InstitutionalProxySourceResolver()
     ];
     if (mode === "fast")     return fast;
