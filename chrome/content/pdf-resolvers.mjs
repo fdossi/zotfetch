@@ -32,21 +32,30 @@ function _resolveUrl(raw, base) {
 function _genericPdfExtract(doc, base) {
   if (!doc) return null;
 
-  // 1. <meta name="citation_pdf_url">
+  // 1. Meta tags
   const metaSelectors = [
     'meta[name="citation_pdf_url"]',
     'meta[property="citation_pdf_url"]',
     'meta[name="dc.identifier"][scheme="PDF"]',
-    'meta[property="og:pdf"]'
+    'meta[property="og:pdf"]',
+    'meta[name="prism:url"][content*=".pdf"]',
+    'meta[name="dc.format"][content*="pdf"]'
   ];
   for (const sel of metaSelectors) {
     const val = doc.querySelector(sel)?.getAttribute("content");
     if (val) { const r = _resolveUrl(val, base); if (r) return r; }
   }
 
-  // 2. <link rel="alternate" type="application/pdf">
-  const alt = doc.querySelector('link[rel="alternate"][type="application/pdf"]');
-  if (alt) { const r = _resolveUrl(alt.getAttribute("href"), base); if (r) return r; }
+  // 2. Link tags
+  const linkSelectors = [
+    'link[rel="alternate"][type="application/pdf"]',
+    'link[rel="enclosure"][type="application/pdf"]',
+    'link[type="application/pdf"]'
+  ];
+  for (const sel of linkSelectors) {
+    const el = doc.querySelector(sel);
+    if (el) { const r = _resolveUrl(el.getAttribute("href"), base); if (r) return r; }
+  }
 
   // 3. Embedded viewers
   for (const sel of ["iframe[src]", "embed[src]", "object[data]"]) {
@@ -59,14 +68,17 @@ function _genericPdfExtract(doc, base) {
     }
   }
 
-  // 4. Anchor heuristics
+  // 4. Anchor heuristics - expanded patterns
   for (const a of Array.from(doc.querySelectorAll("a[href]"))) {
     const href = a.getAttribute("href") || "";
     const text = (a.textContent || "").trim().toLowerCase();
+    const title = (a.getAttribute("title") || "").toLowerCase();
     if (
       /\.pdf(\?|#|$)/i.test(href) ||
-      /\/(pdf|download)\//i.test(href) ||
-      /\b(pdf|download pdf|full[- ]text pdf|view pdf|get pdf)\b/i.test(text)
+      /\/(pdf|download|fulltext|full-text)\//i.test(href) ||
+      /\b(pdf|download pdf|full[- ]text pdf|view pdf|get pdf|download|full text|access pdf|read pdf)\b/i.test(text) ||
+      /\b(pdf|download|fulltext)\b/i.test(title) ||
+      href.includes('pdf') && (text.includes('download') || text.includes('pdf') || title.includes('pdf'))
     ) {
       const r = _resolveUrl(href, base);
       if (r) return r;
@@ -115,7 +127,10 @@ var DirectPDFResolver = class {
       try {
         const resp = await Zotero.HTTP.request("HEAD", candidate.url, {
           timeout: ctx.timeoutMs,
-          headers: candidate.headers || {}
+          headers: {
+            ...Utils.getStealthHeaders(),
+            ...(candidate.headers || {})
+          }
         });
         const ct = resp.getResponseHeader?.("Content-Type") || "";
         if (/application\/pdf/i.test(ct)) {
@@ -132,7 +147,7 @@ var DirectPDFResolver = class {
       const resp = await Zotero.HTTP.request("GET", candidate.url, {
         timeout: ctx.timeoutMs,
         headers: {
-          Accept: "application/pdf,*/*;q=0.8",
+          ...Utils.getStealthHeaders({ isPdf: true }),
           ...(candidate.headers || {})
         }
       });
@@ -293,6 +308,213 @@ const PUBLISHER_RULES = [
       const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
       return meta ? _resolveUrl(meta, base) : null;
     }
+  },
+  {
+    // PLOS
+    hostPattern: /plos\.org/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href*="/article/file?type=printable"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // eLife
+    hostPattern: /elifesciences\.org/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href$=".pdf"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // BioMed Central / Springer Nature OA
+    hostPattern: /biomedcentral\.com/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href*="/track/pdf/"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // F1000Research
+    hostPattern: /f1000research\.com/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href$=".pdf"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // PeerJ
+    hostPattern: /peerj\.com/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href*="/pdf/"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // Oxford University Press
+    hostPattern: /academic\.oup\.com/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href*="/pdf/"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // Royal Society of Chemistry
+    hostPattern: /pubs\.rsc\.org/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href*="/pdf/"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // JAMA Network
+    hostPattern: /jamanetwork\.com/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href*="/pdf/"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // BMJ
+    hostPattern: /bmj\.com/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href*="/content/"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // The Lancet
+    hostPattern: /thelancet\.com/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href*="/pdfs/"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // NEJM
+    hostPattern: /nejm\.org/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href*="/doi/pdf/"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // Annals of Internal Medicine
+    hostPattern: /annals\.org/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href*="/pdf/"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // American Heart Association
+    hostPattern: /ahajournals\.org/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href*="/pdf/"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // Circulation
+    hostPattern: /circulation\.org/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href*="/pdf/"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // JAMA
+    hostPattern: /jama\.com/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href*="/pdf/"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // Cell
+    hostPattern: /cell\.com/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href*="/pdf/"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // Science
+    hostPattern: /science\.org/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href*="/pdf/"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // Nature
+    hostPattern: /nature\.com/i,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      const a = doc.querySelector('a[href$=".pdf"]');
+      const href = a?.getAttribute("href");
+      return href ? _resolveUrl(href, base) : null;
+    }
+  },
+  {
+    // Generic fallback for any host with citation_pdf_url meta tag
+    hostPattern: /.*/,
+    extract(doc, base) {
+      const meta = doc.querySelector('meta[name="citation_pdf_url"]')?.getAttribute("content");
+      if (meta) return _resolveUrl(meta, base);
+      return null;
+    }
   }
 ];
 
@@ -319,11 +541,14 @@ var PublisherPatternResolver = class {
 
     let doc;
     try {
+      // Use aggressive stealth headers for protected hosts like Elsevier
+      const stealthHeaders = policy ? Utils.getAggressiveStealthHeaders({ isNavigation: true }) : Utils.getStealthHeaders({ isNavigation: true });
+
       const resp = await Zotero.HTTP.request("GET", candidate.url, {
         responseType: "document",
         timeout: ctx.timeoutMs,
         headers: {
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          ...stealthHeaders,
           ...(candidate.headers || {})
         }
       });
@@ -391,6 +616,119 @@ var PublisherPatternResolver = class {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SciHubPDFResolver
+// Specialized resolver for Sci-Hub pages. Sci-Hub embeds PDFs in iframes or
+// embeds with specific selectors. This resolver tries to extract the PDF URL
+// directly from Sci-Hub's DOM structure.
+// ─────────────────────────────────────────────────────────────────────────────
+var SciHubPDFResolver = class {
+  canResolve(candidate) {
+    return candidate.sourceId === "scihub" && candidate.kind === "landing-page";
+  }
+
+  async resolve(candidate, ctx) {
+    const t0 = Date.now();
+    const host = Utils.getDomain(candidate.url);
+    const policy = ProtectedHosts.getHostPolicy(host);
+
+    ctx.logger(`[SciHubPDFResolver] ${candidate.url.substring(0, 80)}`);
+
+    let doc;
+    try {
+      // Use aggressive stealth headers for protected hosts
+      const stealthHeaders = policy ? Utils.getAggressiveStealthHeaders({ isNavigation: true }) : Utils.getStealthHeaders({ isNavigation: true });
+
+      const resp = await Zotero.HTTP.request("GET", candidate.url, {
+        responseType: "document",
+        timeout: ctx.timeoutMs,
+        headers: {
+          ...stealthHeaders,
+          ...(candidate.headers || {})
+        }
+      });
+      doc = resp.responseXML;
+    } catch (error) {
+      const reason = _classifyHttpError(error);
+      ctx.logger(`[SciHubPDFResolver] Fetch error: ${reason}`);
+      return { ok: false, failureReason: reason };
+    }
+
+    if (!doc) return { ok: false, failureReason: "nopdf" };
+
+    // ── Challenge detection ─────────────────────────────────────────────
+    const challengeReason = ProtectedHosts.detectChallengeInDoc(doc);
+    if (challengeReason) {
+      ctx.logger(`[SciHubPDFResolver] Challenge detected: ${challengeReason}`);
+      return { ok: false, failureReason: challengeReason };
+    }
+
+    // Sci-Hub specific extraction
+    let extracted = this._extractFromSciHub(doc, candidate.url);
+
+    if (!extracted) {
+      ctx.logger(`[SciHubPDFResolver] No PDF found (${Date.now() - t0}ms)`);
+      return { ok: false, failureReason: "nopdf" };
+    }
+
+    ctx.logger(`[SciHubPDFResolver] Extracted: ${extracted.substring(0, 80)} (${Date.now() - t0}ms)`);
+
+    const validated = await _validatePdf(extracted, candidate.headers, ctx, candidate.url);
+    if (!validated) {
+      ctx.logger(`[SciHubPDFResolver] Validation failed`);
+      return { ok: false, failureReason: "nopdf" };
+    }
+
+    ctx.logger(`[SciHubPDFResolver] OK (${Date.now() - t0}ms)`);
+    return {
+      ok: true,
+      finalPdfUrl: extracted,
+      method: "scihub",
+      headers: candidate.headers
+    };
+  }
+
+  _extractFromSciHub(doc, base) {
+    // Sci-Hub specific selectors
+    // Look for iframe with id="pdf"
+    let iframe = doc.querySelector('iframe#pdf');
+    if (iframe) {
+      const src = iframe.getAttribute("src");
+      if (src && /\.pdf/i.test(src)) return _resolveUrl(src, base);
+    }
+
+    // Look for embed with PDF
+    const embed = doc.querySelector('embed[type="application/pdf"], embed[src*=".pdf"]');
+    if (embed) {
+      const src = embed.getAttribute("src");
+      if (src) return _resolveUrl(src, base);
+    }
+
+    // Look for object with PDF
+    const object = doc.querySelector('object[type="application/pdf"], object[data*=".pdf"]');
+    if (object) {
+      const data = object.getAttribute("data");
+      if (data) return _resolveUrl(data, base);
+    }
+
+    // Look for download button or link
+    const downloadBtn = doc.querySelector('a[href*=".pdf"], button[onclick*=".pdf"]');
+    if (downloadBtn) {
+      const href = downloadBtn.getAttribute("href");
+      if (href && /\.pdf/i.test(href)) return _resolveUrl(href, base);
+      // Check onclick for PDF URL
+      const onclick = downloadBtn.getAttribute("onclick");
+      if (onclick) {
+        const match = onclick.match(/['"](https?:[^'"]*\.pdf[^'"]*)['"]/i);
+        if (match) return _resolveUrl(match[1], base);
+      }
+    }
+
+    // Fallback to generic extraction
+    return _genericPdfExtract(doc, base);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // HtmlLandingPDFResolver
 // Generic HTML→PDF resolver: fetches the landing page, parses the DOM and
 // tries progressively weaker extraction strategies.
@@ -408,15 +746,21 @@ var HtmlLandingPDFResolver = class {
 
   async resolve(candidate, ctx) {
     const t0 = Date.now();
+    const host = Utils.getDomain(candidate.url);
+    const policy = ProtectedHosts.getHostPolicy(host);
+
     ctx.logger(`[HtmlLandingPDFResolver] ${candidate.url.substring(0, 80)}`);
 
     let doc;
     try {
+      // Use aggressive stealth headers for protected hosts
+      const stealthHeaders = policy ? Utils.getAggressiveStealthHeaders({ isNavigation: true }) : Utils.getStealthHeaders({ isNavigation: true });
+
       const resp = await Zotero.HTTP.request("GET", candidate.url, {
         responseType: "document",
         timeout: ctx.timeoutMs,
         headers: {
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          ...stealthHeaders,
           ...(candidate.headers || {})
         }
       });
@@ -556,7 +900,10 @@ async function _validatePdf(url, headers, ctx, landingUrl) {
   }
 
   try {
-    const reqHeaders = { ...(headers || {}) };
+    const reqHeaders = {
+      ...Utils.getStealthHeaders(),
+      ...(headers || {})
+    };
     if (landingUrl) reqHeaders["Referer"] = landingUrl;
     const head = await Zotero.HTTP.request("HEAD", url, {
       timeout: ctx.timeoutMs,
@@ -703,5 +1050,6 @@ var HiddenBrowserPDFResolver = class {
 
 this.DirectPDFResolver = DirectPDFResolver;
 this.PublisherPatternResolver = PublisherPatternResolver;
+this.SciHubPDFResolver = SciHubPDFResolver;
 this.HtmlLandingPDFResolver = HtmlLandingPDFResolver;
 this.HiddenBrowserPDFResolver = HiddenBrowserPDFResolver;

@@ -39,6 +39,37 @@ const SAFE_OA_HOSTS = new Set([
   "f1000research.com",                 // F1000Research — fully OA
   "semanticscholar.org", "pdfs.semanticscholar.org",
   "openalex.org",
+  // Additional OA repositories
+  "peerj.com",                        // PeerJ
+  "frontiersin.org",                  // Frontiers
+  "nature.com",                       // Nature (some OA)
+  "science.org",                      // Science (some OA)
+  "cell.com",                         // Cell (some OA)
+  "thelancet.com",                    // The Lancet (some OA)
+  "bmj.com",                          // BMJ
+  "jama.com",                         // JAMA
+  "annals.org",                       // Annals of Internal Medicine
+  "nejm.org",                         // New England Journal of Medicine
+  "ahajournals.org",                  // American Heart Association
+  "circulation.org",                  // Circulation
+  "jamanetwork.com",                  // JAMA Network
+  "academic.oup.com",                 // Oxford University Press (OA articles)
+  "pubs.acs.org",                     // ACS (OA articles)
+  "pubs.rsc.org",                     // Royal Society of Chemistry (OA)
+  "onlinelibrary.wiley.com",          // Wiley (OA articles)
+  "link.springer.com",                // Springer (OA articles)
+  "tandfonline.com",                  // Taylor & Francis (OA articles)
+  "ieeexplore.ieee.org",              // IEEE (OA articles)
+  // Preprint servers
+  "preprints.org",                    // Preprints.org
+  "researchsquare.com",               // Research Square
+  "authorea.com",                     // Authorea
+  // Institutional repositories
+  "dash.harvard.edu",                 // Harvard DASH
+  "escholarship.org",                 // UC eScholarship
+  "digitalcommons.unl.edu",           // University of Nebraska-Lincoln
+  "repository.upenn.edu",             // University of Pennsylvania
+  "scholarworks.umass.edu",           // UMass ScholarWorks
   // ── New OA sources ─────────────────────────────────────────────────────────
   "scholar.archive.org",               // Internet Archive Scholar
   "web.archive.org",                   // Wayback Machine (Fatcat webarchive URLs)
@@ -123,6 +154,8 @@ class ZotFetch {
       europepmc: 0,
       internetarchive: 0,
       paperity: 0,
+      doaj: 0,
+      scihub: 0,
       oamg: 0,
       oarepository: 0,
       institutional: 0,
@@ -493,6 +526,8 @@ class ZotFetch {
         else if (sid === "europepmc")                  stats.europepmc++;
         else if (sid === "internet-archive")           stats.internetarchive++;
         else if (sid === "paperity")                   stats.paperity++;
+        else if (sid === "doaj")                      stats.doaj++;
+        else if (sid === "scihub")                     stats.scihub++;
         else if (sid === "oamg")                       stats.oamg++;
         else if (sid.startsWith("institutional-proxy")) stats.institutional++;
         else if (sid === "capes")                      stats.capes++;
@@ -528,6 +563,8 @@ class ZotFetch {
       new CoreSourceResolver(),
       new InternetArchiveSourceResolver(),   // Fatcat API — archived repo copies (priority 84)
       new PaperitySourceResolver(),          // Paperity OA journal aggregator  (priority 81)
+      new DoajSourceResolver(),              // DOAJ OA journal directory       (priority 82)
+      new SciHubSourceResolver(),            // Sci-Hub mirrors                  (priority 80)
       new OaRepositorySourceResolver(),
       new NativeDoiSourceResolver(),         // Zotero Connector-like: translator + proxy
       new DoiLandingSourceResolver(),        // fallback HTML extraction
@@ -546,6 +583,7 @@ class ZotFetch {
     return [
       new DirectPDFResolver(),
       new PublisherPatternResolver(),
+      new SciHubPDFResolver(),
       new HtmlLandingPDFResolver(),
       // HiddenBrowserPDFResolver is tried last: it spins up a real Gecko
       // browser instance (Zotero.HTTP.processDocuments) so JS challenges

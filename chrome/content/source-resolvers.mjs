@@ -64,18 +64,17 @@ var NativeSourceResolver = class {
   enabled() { return true; }
 
   async buildCandidates(_item, ids) {
-    // Skip for publishers whose bot-detection immediately blocks Zotero's real
-    // UA (reported as "Zotero/8.x" in captcha screens). Zotero's internal OA
-    // finder uses that UA and cannot be overridden. Any truly OA copy will be
-    // found by ZotFetch's own Unpaywall/S2/OpenAlex pipeline with spoofed
-    // browser headers, without triggering a publisher captcha.
-    if (ids.doi) {
-      const pubHost = _publisherHostFromDoi(ids.doi);
-      if (pubHost && ProtectedHosts.getHostPolicy(pubHost)?.earlyAbortOnChallenge) {
-        Zotero.debug(`[ZotFetch] NativeSourceResolver: skip ${pubHost} (bot-detection publisher)`);
-        return [];
-      }
-    }
+    // Defence-in-depth for DOI prefixes not covered by the buildCandidates
+    // filter: if a previous batch run already proved this (doi, publisher)
+    // is bot-blocked, skip rather than let Zotero's real UA re-trigger it.
+    // But for OA papers, native might still work, so don't skip.
+    // if (ids.doi) {
+    //   const pubHost = _publisherHostFromDoi(ids.doi);
+    //   if (pubHost && ProtectedHosts.getHostPolicy(pubHost)?.earlyAbortOnChallenge) {
+    //     Zotero.debug(`[ZotFetch] NativeSourceResolver: skip ${pubHost} (bot-detection publisher)`);
+    //     return [];
+    //   }
+    // }
     return [{
       sourceId: "native",
       label: "Zotero Native",
@@ -104,7 +103,8 @@ var UnpaywallSourceResolver = class {
     try {
       const resp = await Zotero.HTTP.request("GET", url, {
         responseType: "json",
-        timeout: ZotFetchPrefs.getUnpaywallTimeoutMs()
+        timeout: ZotFetchPrefs.getUnpaywallTimeoutMs(),
+        headers: Utils.getStealthHeaders()
       });
 
       const data = resp.response;
@@ -679,13 +679,43 @@ var OaMgSourceResolver = class {
   async buildCandidates(_item, ids) {
     if (!ids.doi) return [];
 
+    const candidates = [];
+
+    // Try OA.mg API first for direct PDF URLs
+    try {
+      const apiUrl = `https://api.oa.mg/work/doi/${encodeURIComponent(ids.doi)}`;
+      const resp = await Zotero.HTTP.request("GET", apiUrl, {
+        responseType: "json",
+        timeout: 10000,
+        headers: Utils.getStealthHeaders()
+      });
+
+      const data = resp.response;
+      if (data?.data?.pdf_url) {
+        candidates.push({
+          sourceId: "oamg",
+          label: "OA.mg API",
+          url: data.data.pdf_url,
+          kind: _looksLikePdf(data.data.pdf_url) ? "direct-pdf" : "landing-page",
+          priority: 75,
+          headers: {
+            Referer: "https://oa.mg/",
+            ...Utils.getStealthHeaders()
+          }
+        });
+      }
+    } catch (error) {
+      // API failed, fall back to landing page
+    }
+
+    // Fallback: oa.mg landing page
     // oa.mg URL format: https://oa.mg/work/<DOI>
     // Use encodeURI (not encodeURIComponent) so the '/' in DOI path segments
     // is preserved — oa.mg expects https://oa.mg/work/10.1016/j.cell.2020
     // not https://oa.mg/work/10.1016%2Fj.cell.2020.
     const landingUrl = `https://oa.mg/work/${encodeURI(ids.doi)}`;
 
-    return [{
+    candidates.push({
       sourceId: "oamg",
       label: "OA.mg",
       url: landingUrl,
@@ -695,7 +725,127 @@ var OaMgSourceResolver = class {
         Referer: "https://oa.mg/",
         ...Utils.getStealthHeaders()
       }
-    }];
+    });
+
+    return candidates;
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SciHubSourceResolver
+// Uses Sci-Hub mirrors to obtain PDFs. Sci-Hub provides access to paywalled
+// papers by scraping publisher sites. Multiple mirrors are tried.
+// Priority is set lower than OA sources but higher than paywalled ones.
+// ─────────────────────────────────────────────────────────────────────────────
+var SciHubSourceResolver = class {
+  constructor() { this.id = "scihub"; }
+
+  enabled() { return true; }
+
+  async buildCandidates(_item, ids) {
+    if (!ids.doi) return [];
+
+    // Sci-Hub mirrors (matching Sci-PDF plugin)
+    const mirrors = [
+      "https://sci-hub.se",
+      "https://sci-hub.st",
+      "https://sci-hub.ru",
+      "https://sci-hub.ren",
+      "https://sci-hub.wf",
+      "https://sci-hub.ee",
+      "https://sci-hub.box",
+      "https://sci-hub.red"
+    ];
+
+    const candidates = [];
+    let priority = 80;
+
+    for (const mirror of mirrors) {
+      const url = `${mirror}/${ids.doi}`;
+      candidates.push({
+        sourceId: "scihub",
+        label: "Sci-Hub",
+        url,
+        kind: "landing-page",
+        priority: priority--,
+        headers: Utils.getStealthHeaders()
+      });
+    }
+
+    return candidates;
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DoajSourceResolver
+// Queries the DOAJ (Directory of Open Access Journals) API for OA journal
+// articles. DOAJ indexes fully OA journals and provides direct PDF links.
+// No API key required; rate limit is generous.
+// ─────────────────────────────────────────────────────────────────────────────
+var DoajSourceResolver = class {
+  constructor() { this.id = "doaj"; }
+
+  enabled() { return true; }
+
+  async buildCandidates(_item, ids) {
+    if (!ids.doi) return [];
+
+    const domain = "doaj.org";
+    if (ZotFetch.cooldown.isDomainCoolingDown(domain)) return [];
+    await ZotFetch.cooldown.honorDomainGap(domain, ZotFetchPrefs);
+
+    try {
+      const url = `https://doaj.org/api/v2/search/articles/doi:${encodeURIComponent(ids.doi)}`;
+      const resp = await Zotero.HTTP.request("GET", url, {
+        responseType: "json",
+        timeout: 10000,
+        headers: { Accept: "application/json" }
+      });
+
+      const results = resp.response?.results;
+      if (!Array.isArray(results) || !results.length) {
+        ZotFetch.cooldown.markDomainNonCaptcha(domain);
+        return [];
+      }
+
+      const candidates = [];
+      for (const article of results) {
+        // DOAJ provides fulltext links
+        const links = article?.bibjson?.link;
+        if (Array.isArray(links)) {
+          for (const link of links) {
+            if (link.type === "fulltext" && link.url) {
+              const pdfUrl = link.url;
+              candidates.push({
+                sourceId: "doaj",
+                label: "DOAJ",
+                url: pdfUrl,
+                kind: _looksLikePdf(pdfUrl) ? "direct-pdf" : "landing-page",
+                priority: 82,
+                headers: { Referer: "https://doaj.org/" }
+              });
+            }
+          }
+        }
+      }
+
+      if (!candidates.length) {
+        ZotFetch.cooldown.markDomainNonCaptcha(domain);
+        return [];
+      }
+
+      ZotFetch.cooldown.markDomainSuccess(domain);
+      return candidates;
+
+    } catch (error) {
+      if (Utils.isCaptchaError(error)) {
+        ZotFetch.cooldown.markDomainCaptcha(domain);
+      } else {
+        ZotFetch.cooldown.markDomainNonCaptcha(domain);
+      }
+      Zotero.logError(error);
+      return [];
+    }
   }
 };
 
@@ -931,6 +1081,7 @@ this.CoreSourceResolver = CoreSourceResolver;
 this.EuropePmcSourceResolver = EuropePmcSourceResolver;
 this.InternetArchiveSourceResolver = InternetArchiveSourceResolver;
 this.PaperitySourceResolver = PaperitySourceResolver;
+this.DoajSourceResolver = DoajSourceResolver;
 this.OaMgSourceResolver = OaMgSourceResolver;
 this.OaRepositorySourceResolver = OaRepositorySourceResolver;
 this.NativeDoiSourceResolver = NativeDoiSourceResolver;

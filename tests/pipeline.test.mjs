@@ -39,8 +39,11 @@ globalThis.Utils = {
     try { return new URL(url).hostname.toLowerCase(); } catch (_) { return ""; }
   },
   isCaptchaError() { return false; },
-  getStealthHeaders() {
-    return { "User-Agent": "TestAgent/1.0" };
+  getStealthHeaders(options = {}) {
+    return { 
+      "User-Agent": "TestAgent/1.0",
+      "Accept": options.isPdf ? "application/pdf,*/*;q=0.8" : "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    };
   },
   isTitleSimilar() { return { match: false, score: 0 }; }
 };

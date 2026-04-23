@@ -3,7 +3,7 @@
 
 const BROWSER_FINGERPRINTS = [
   {
-    // Chrome 135 / Windows
+    // Chrome 135 / Windows (most common)
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
     secChUa: '"Chromium";v="135", "Google Chrome";v="135", "Not-A.Brand";v="99"',
     secChUaMobile: "?0",
@@ -36,6 +36,27 @@ const BROWSER_FINGERPRINTS = [
     secChUa: null,
     secChUaMobile: null,
     secChUaPlatform: null
+  },
+  {
+    // Chrome 134 / Windows (slightly older)
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+    secChUa: '"Chromium";v="134", "Google Chrome";v="134", "Not-A.Brand";v="99"',
+    secChUaMobile: "?0",
+    secChUaPlatform: '"Windows"'
+  },
+  {
+    // Chrome 135 / Linux
+    userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+    secChUa: '"Chromium";v="135", "Google Chrome";v="135", "Not-A.Brand";v="99"',
+    secChUaMobile: "?0",
+    secChUaPlatform: '"Linux"'
+  },
+  {
+    // Mobile Chrome / Android
+    userAgent: "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Mobile Safari/537.36",
+    secChUa: '"Chromium";v="135", "Google Chrome";v="135", "Not-A.Brand";v="99"',
+    secChUaMobile: "?1",
+    secChUaPlatform: '"Android"'
   }
 ];
 
@@ -93,23 +114,88 @@ var Utils = {
   },
 
   // Returns a randomised headers object with a modern browser fingerprint.
-  // Client Hints (sec-ch-ua-*) are only included for Chromium-based profiles;
-  // Firefox and Safari do not emit them so we omit them for those profiles.
-  getStealthHeaders() {
+  // Enhanced for bypassing aggressive bot detection like Elsevier captchas.
+  // Includes realistic headers that mimic human browsing behavior.
+  getStealthHeaders(options = {}) {
     const fp = BROWSER_FINGERPRINTS[Math.floor(Math.random() * BROWSER_FINGERPRINTS.length)];
+
+    // Common Accept-Language combinations to look more human
+    const acceptLanguages = [
+      "en-US,en;q=0.9",
+      "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7",
+      "en-GB,en;q=0.9",
+      "en-US,en;q=0.9,de;q=0.8",
+      "en-US,en;q=0.9,es;q=0.8"
+    ];
+
+    // Vary sec-fetch-* headers to avoid pattern detection
+    const fetchModes = ["navigate", "cors", "no-cors"];
+    const fetchSites = ["none", "cross-site", "same-origin", "same-site"];
+
     const headers = {
       "User-Agent": fp.userAgent,
-      "sec-fetch-dest": "document",
+      "Accept": options.isPdf ? "application/pdf,*/*;q=0.8" : "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "Accept-Language": acceptLanguages[Math.floor(Math.random() * acceptLanguages.length)],
+      "Accept-Encoding": "gzip, deflate, br",
+      "DNT": "1",
+      "Connection": "keep-alive",
+      "Upgrade-Insecure-Requests": "1",
+      "Sec-Fetch-Dest": options.isPdf ? "document" : "document",
+      "Sec-Fetch-Mode": fetchModes[Math.floor(Math.random() * fetchModes.length)],
+      "Sec-Fetch-Site": fetchSites[Math.floor(Math.random() * fetchSites.length)],
+      "Sec-Fetch-User": options.isNavigation ? "?1" : undefined,
+      "Cache-Control": "max-age=0",
+      "sec-ch-ua": fp.secChUa || undefined,
+      "sec-ch-ua-mobile": fp.secChUaMobile || undefined,
+      "sec-ch-ua-platform": fp.secChUaPlatform || undefined
+    };
+
+    // Remove undefined headers
+    Object.keys(headers).forEach(key => {
+      if (headers[key] === undefined) {
+        delete headers[key];
+      }
+    });
+
+    return headers;
+  },
+
+  // Returns a randomized delay to simulate human browsing behavior
+  getHumanDelayMs(minMs = 1000, maxMs = 3000) {
+    return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+  },
+
+  // Enhanced stealth headers specifically for challenging sites like Elsevier
+  getAggressiveStealthHeaders(options = {}) {
+    const baseHeaders = this.getStealthHeaders(options);
+
+    // Add additional headers that make requests look more human
+    const aggressiveHeaders = {
+      ...baseHeaders,
+      "sec-ch-ua-arch": '"x86"',  // Architecture hint
+      "sec-ch-ua-bitness": '"64"', // Bitness hint
+      "sec-ch-ua-full-version": options.uaVersion || '"135.0.0.0"',
+      "sec-ch-ua-full-version-list": options.uaVersionList || '"Chromium";v="135.0.0.0", "Google Chrome";v="135.0.0.0", "Not-A.Brand";v="99.0.0.0"',
+      "sec-ch-ua-model": '""',   // Empty for desktop
+      "sec-ch-ua-platform-version": '"10.0.0"', // Windows version
+      "sec-fetch-dest": options.isPdf ? "document" : "document",
       "sec-fetch-mode": "navigate",
       "sec-fetch-site": "none",
-      "upgrade-insecure-requests": "1"
+      "sec-fetch-user": "?1",
+      "sec-purpose": "prefetch", // Sometimes used for navigation
+      "priority": "u=0, i",     // Priority hint
+      "pragma": "no-cache",
+      "te": "trailers"          // Transfer encoding
     };
-    if (fp.secChUa) {
-      headers["sec-ch-ua"] = fp.secChUa;
-      headers["sec-ch-ua-mobile"] = fp.secChUaMobile;
-      headers["sec-ch-ua-platform"] = fp.secChUaPlatform;
-    }
-    return headers;
+
+    // Remove undefined headers
+    Object.keys(aggressiveHeaders).forEach(key => {
+      if (aggressiveHeaders[key] === undefined) {
+        delete aggressiveHeaders[key];
+      }
+    });
+
+    return aggressiveHeaders;
   },
 
   sleep(ms) {
