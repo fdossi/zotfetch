@@ -57,14 +57,17 @@ class CooldownManager {
   }
 
   async honorDomainGap(domain, prefs) {
-    const baseGap = parseInt(prefs.getDomainGapMs()) || this.DEFAULT_DOMAIN_GAP_MS;
+    const configuredGap = Number(prefs.getDomainGapMs());
+    const baseGap = Number.isFinite(configuredGap) && configuredGap >= 0
+      ? configuredGap : this.DEFAULT_DOMAIN_GAP_MS;
+    const protectedGap = typeof ProtectedHosts !== "undefined"
+      ? (ProtectedHosts.getHostPolicy(domain)?.minGapMs || 0) : 0;
     const failureCount = this.domainFailureCounts.get(domain) || 0;
     // Adaptive extra wait: 0, +1s, +2s, +4s, ... capped at +15s
     const adaptiveExtra = failureCount > 0
       ? Math.min(1000 * Math.pow(2, failureCount - 1), 15000)
       : 0;
-    const gap = baseGap + adaptiveExtra;
-    if (gap <= 0) return;
+    const gap = Math.max(baseGap + adaptiveExtra, protectedGap);
 
     const last = this.domainLastRequest.get(domain) || 0;
     const elapsed = Date.now() - last;
@@ -79,7 +82,7 @@ class CooldownManager {
   // Jitter increased to 60% to break rhythmic request patterns detectable by WAFs.
   async sleepWithJitter(baseMs) {
     const jitter = Math.floor(baseMs * 0.6 * (Math.random() * 2 - 1));
-    await new Promise(r => setTimeout(r, Math.max(500, baseMs + jitter)));
+    await new Promise(r => setTimeout(r, Math.max(0, baseMs + jitter)));
   }
 
   // Immediately set a penalty cooldown for a domain (e.g., after Cloudflare challenge).

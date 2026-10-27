@@ -1,12 +1,11 @@
 /* ZotFetch Bootstrap - Zotero 8 */
-/** biome-ignore-all lint/suspicious/useIterableCallbackReturn: This would imply an Unecessary rewrite */
-/** biome-ignore-all lint/correctness/noUnusedFunctionParameters: This would imply an Unecessary rewrite */
 
 // Global namespace
 var ZotFetchPlugin = {
   PLUGIN_ID: "zotfetch@edslab.research",
   initialized: false,
   rootURI: null,
+  preferencePaneID: null,
   
   init({ id, version, rootURI }) {
     if (this.initialized) return;
@@ -36,17 +35,20 @@ var ZotFetchPlugin = {
         throw new Error("ZotFetchUI not loaded");
       }
 
-      await ZotFetchUI.init();
-      
-      //Implement the Preference Pane off zotero
-      if (Zotero.PreferencePanes) {
-        Zotero.PreferencePanes.register({
+      Zotero.ZotFetchPrefs = ZotFetchPrefs;
+
+      if (Zotero.PreferencePanes?.register) {
+        this.preferencePaneID = await Zotero.PreferencePanes.register({
           pluginID: id,
+          id: "zotfetch-preferences",
           src: `${rootURI}chrome/content/prefs-dialog.xhtml`,
+          scripts: [`${rootURI}chrome/content/prefs-dialog.js`],
           stylesheets: [`${rootURI}chrome/content/prefs-dialog.css`],
           label: "ZotFetch",
         });
       }
+
+      await ZotFetchUI.init();
 
       // Only fall back to direct DOM injection when MenuManager did not
       // register the menu (Zotero version without MenuManager API, or
@@ -59,19 +61,42 @@ var ZotFetchPlugin = {
       Zotero.debug("ZotFetch startup complete");
     } catch (error) {
       Zotero.logError(error);
+      this.cleanup();
     }
   },
 
-  shutdown({ id, version, rootURI }, reason) {
-    try {
-      Zotero.getMainWindows().forEach(win => ZotFetchUI.removeFromWindow(win));
-      if (ZotFetchUI.menuID && Zotero.MenuManager?.unregisterMenu) {
-        Zotero.MenuManager.unregisterMenu(ZotFetchUI.menuID);
+  cleanup() {
+    const safely = (step) => {
+      try { step(); } catch (error) { Zotero.logError(error); }
+    };
+    safely(() => {
+      if (typeof ZotFetchUI !== "undefined") {
+        Zotero.getMainWindows().forEach(win => ZotFetchUI.removeFromWindow(win));
       }
-      Zotero.debug("ZotFetch shutdown complete");
-    } catch (error) {
-      Zotero.logError(error);
-    }
+    });
+    safely(() => {
+      if (typeof ZotFetchUI !== "undefined" && ZotFetchUI.menuID && Zotero.MenuManager?.unregisterMenu) {
+        Zotero.MenuManager.unregisterMenu(ZotFetchUI.menuID);
+        ZotFetchUI.menuID = null;
+      }
+    });
+    safely(() => {
+      if (this.preferencePaneID && Zotero.PreferencePanes?.unregister) {
+        Zotero.PreferencePanes.unregister(this.preferencePaneID);
+        this.preferencePaneID = null;
+      }
+    });
+    safely(() => {
+      if (typeof ZotFetchPrefs !== "undefined" && Zotero.ZotFetchPrefs === ZotFetchPrefs) {
+        delete Zotero.ZotFetchPrefs;
+      }
+    });
+    this.initialized = false;
+  },
+
+  shutdown() {
+    this.cleanup();
+    Zotero.debug("ZotFetch shutdown complete");
   },
 
   install({ id, version, rootURI }, reason) {
@@ -84,13 +109,13 @@ var ZotFetchPlugin = {
 
   onMainWindowLoad({ window }) {
     // Only inject via DOM when MenuManager is not managing the menu.
-    if (window.ZoteroPane && !ZotFetchUI.menuID) {
+    if (typeof ZotFetchUI !== "undefined" && window.ZoteroPane && !ZotFetchUI.menuID) {
       ZotFetchUI.addToWindow(window);
     }
   },
 
   onMainWindowUnload({ window }) {
-    ZotFetchUI.removeFromWindow(window);
+    if (typeof ZotFetchUI !== "undefined") ZotFetchUI.removeFromWindow(window);
   }
 };
 // Export for Zotero bootstrap

@@ -1,29 +1,29 @@
-<!-- biome-ignore-all lint/a11y/noStaticElementInteractions: THis would imply a rebuild off the whole file unecessarilly -->
-<vbox xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul" 
+<vbox onload="initPrefsPane()" xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
       xmlns:html="http://www.w3.org/1999/xhtml">
 
 <html:div id="zotfetch-prefs-root">
 
-  <html:h1>&#x2699; ZotFetch &#x2013; Preferences <html:small id="ver"></html:small></html:h1>
+  <html:h1>&#x2699; ZotFetch &#x2013; Preferences <html:small id="zotfetch-ver"></html:small></html:h1>
 
-  <html:div id="errMsg" class="err-msg"></html:div>
+  <html:div id="zotfetch-errMsg" class="err-msg"></html:div>
+  <html:div id="zotfetch-statusMsg" class="status-msg" role="status" aria-live="polite"></html:div>
 
   <!-- ── Open Access APIs ───────────────────────────────────────────────── -->
   <html:section>
     <html:h2>Open Access APIs</html:h2>
 
     <html:div class="field">
-      <html:label for="f-email">Your email address <html:span style="color:#c0392b">*</html:span></html:label>
-      <html:input type="email" id="f-email" spellcheck="false"
+      <html:label for="zotfetch-f-email">Your email address (optional)</html:label>
+      <html:input type="email" id="zotfetch-f-email" spellcheck="false"
             placeholder="your@email.com" autocomplete="email"/>
-      <html:p class="hint">Required by Unpaywall, CrossRef, OpenAlex and Europe PMC polite-pool APIs.
-        Your address is only sent as an API identifier &#x2014; no marketing emails are sent.</html:p>
+      <html:p class="hint">Used as an API contact address for Unpaywall and other scholarly services.
+        If left blank, ZotFetch uses its built-in contact address.</html:p>
     </html:div>
 
     <html:div class="field">
-      <html:label for="f-core">CORE Repository API Key
+      <html:label for="zotfetch-f-core">CORE Repository API Key
         <html:span style="font-weight:400;color:GrayText"> (optional)</html:span></html:label>
-      <html:input type="text" id="f-core" spellcheck="false"
+      <html:input type="password" id="zotfetch-f-core" spellcheck="false"
             placeholder="Leave empty for anonymous access (~10 req/min)"/>
       <html:p class="hint">Free key at <html:strong>core.ac.uk/services/api</html:strong>
         &#x2014; raises rate limit to 10,000 req/day and unlocks download URLs.</html:p>
@@ -36,8 +36,8 @@
 
 <!-- Institutional proxy -->
     <html:div class="field">
-      <html:label for="f-proxy">University / Institutional Proxy URL</html:label>
-      <html:input type="text" id="f-proxy" spellcheck="false"
+      <html:label for="zotfetch-f-proxy">University / Institutional Proxy URL</html:label>
+      <html:input type="text" id="zotfetch-f-proxy" spellcheck="false"
             placeholder="https://proxy.sua-universidade.edu.br/login?url="/>
       <html:p class="hint">ZotFetch wraps every DOI URL through this address so requests arrive
         authenticated by your institution&#x2019;s subscription. Works on-campus, via VPN,
@@ -72,16 +72,16 @@
 
     <!-- CAPES -->
     <html:div class="row">
-      <html:input type="checkbox" id="f-capes-on"/>
-      <html:label for="f-capes-on">
+      <html:input type="checkbox" id="zotfetch-f-capes-on"/>
+      <html:label for="zotfetch-f-capes-on">
         <html:strong>Enable CAPES Portal</html:strong>
         &#x2014; Brazilian federal universities (peri&#xF3;dicos.capes.gov.br)
       </html:label>
     </html:div>
 
-    <html:div id="capes-block" class="field">
-      <html:label for="f-capes-url">CAPES Gateway URL</html:label>
-      <html:input type="text" id="f-capes-url" spellcheck="false"
+    <html:div id="zotfetch-capes-block" class="field">
+      <html:label for="zotfetch-f-capes-url">CAPES Gateway URL</html:label>
+      <html:input type="text" id="zotfetch-f-capes-url" spellcheck="false"
             placeholder="https://capes.ez.no/login?url="/>
       <html:p class="hint">
         The authenticated CAPES gateway URL provided by your institution&#x2019;s library.
@@ -105,7 +105,7 @@
       </html:details>
 
       <html:div class="note-info">
-        &#x2139; CAPES only runs in <html:strong>Batch Download</html:strong> (2nd pass / fallback)
+        &#x2139; CAPES runs in <html:strong>Batch Download</html:strong> (2nd pass when Fast Mode is on)
         and <html:strong>Retry Failed</html:strong> &#x2014; not in Ultra Fast mode.
       </html:div>
     </html:div>
@@ -116,27 +116,27 @@
     <html:h2>Download Behaviour</html:h2>
 
     <html:div class="row">
-      <html:input type="checkbox" id="f-fast"/>
-      <html:label for="f-fast">
+      <html:input type="checkbox" id="zotfetch-f-fast"/>
+      <html:label for="zotfetch-f-fast">
         <html:strong>Fast Mode</html:strong> &#x2014; 2-pass strategy:
-        OA sources first; CAPES only on the fallback pass (recommended)
+        Fast sources first; CAPES on a fallback pass (recommended)
       </html:label>
     </html:div>
 
     <html:div class="grid2" style="margin-top:10px">
       <html:div class="field">
-        <html:label for="f-batch">Batch size (max items per run)</html:label>
-        <html:input type="number" id="f-batch" min="1" max="500" step="1"/>
+        <html:label for="zotfetch-f-batch">Batch size (max items per run)</html:label>
+        <html:input type="number" id="zotfetch-f-batch" min="1" max="500" step="1"/>
         <html:p class="hint">Items processed per Batch Download click</html:p>
       </html:div>
       <html:div class="field" style="margin-top:4px">
-        <html:label for="f-delay">Delay between items (ms)</html:label>
-        <html:input type="number" id="f-delay" min="0" max="30000" step="100"/>
+        <html:label for="zotfetch-f-delay">Delay between items (ms)</html:label>
+        <html:input type="number" id="zotfetch-f-delay" min="0" max="30000" step="100"/>
         <html:p class="hint">&#x2265; 900 ms recommended to stay under rate limits</html:p>
       </html:div>
       <html:div class="field" style="margin-top:4px">
-        <html:label for="f-gap">Minimum gap between API calls (ms)</html:label>
-        <html:input type="number" id="f-gap" min="0" max="30000" step="100"/>
+        <html:label for="zotfetch-f-gap">Minimum gap between API calls (ms)</html:label>
+        <html:input type="number" id="zotfetch-f-gap" min="0" max="30000" step="100"/>
         <html:p class="hint">Pause between successive requests to the same domain</html:p>
       </html:div>
     </html:div>
@@ -147,8 +147,8 @@
     <html:summary>Advanced Settings</html:summary>
 
     <html:div class="row" style="margin-top:8px">
-      <html:input type="checkbox" id="f-anticaptcha"/>
-      <html:label for="f-anticaptcha">
+      <html:input type="checkbox" id="zotfetch-f-anticaptcha"/>
+      <html:label for="zotfetch-f-anticaptcha">
         <html:strong>Anti-Captcha Mode</html:strong>
         &#x2014; adds human-like random delays on challenge-protected publishers
       </html:label>
@@ -156,212 +156,28 @@
 
     <html:div class="grid2" style="margin-top:10px">
       <html:div class="field">
-        <html:label for="f-timeout">Request timeout (ms)</html:label>
-        <html:input type="number" id="f-timeout" min="5000" max="120000" step="1000"/>
+        <html:label for="zotfetch-f-timeout">Request timeout (ms)</html:label>
+        <html:input type="number" id="zotfetch-f-timeout" min="5000" max="120000" step="1000"/>
       </html:div>
       <html:div class="field">
-        <html:label for="f-uptimeout">Unpaywall timeout (ms)</html:label>
-        <html:input type="number" id="f-uptimeout" min="5000" max="60000" step="1000"/>
+        <html:label for="zotfetch-f-uptimeout">Unpaywall timeout (ms)</html:label>
+        <html:input type="number" id="zotfetch-f-uptimeout" min="5000" max="60000" step="1000"/>
       </html:div>
       <html:div class="field">
-        <html:label for="f-crtimeout">CrossRef timeout (ms)</html:label>
-        <html:input type="number" id="f-crtimeout" min="5000" max="60000" step="1000"/>
+        <html:label for="zotfetch-f-crtimeout">CrossRef timeout (ms)</html:label>
+        <html:input type="number" id="zotfetch-f-crtimeout" min="5000" max="60000" step="1000"/>
       </html:div>
     </html:div>
   </html:details>
 
 <!-- ── Footer buttons ─────────────────────────────────────────────────── -->
   <html:div class="footer">
-    <html:button type="button" onclick="openHelp()" title="Open the ZotFetch user manual in your browser">&#x2753; Help</html:button>
-    <html:button class="danger" type="button" onclick="resetDefaults()">Reset Defaults</html:button>
+    <html:button type="button" id="zotfetch-help" title="Open the ZotFetch user manual in your browser">&#x2753; Help</html:button>
+    <html:button type="button" id="zotfetch-reset" title="Fill the form with defaults; Save to apply them">Load Defaults</html:button>
     <html:span class="spacer"></html:span>
-    <html:button type="button" onclick="window.close()">Cancel</html:button>
-    <html:button class="primary" type="button" onclick="savePrefs()">Save</html:button>
+    <html:button type="button" id="zotfetch-cancel">Discard Changes</html:button>
+    <html:button class="primary" type="button" id="zotfetch-save">Save</html:button>
   </html:div>
-  <html:script><![CDATA[
-"use strict";
 
-const PREF_PREFIX = 'extensions.zotfetch.';
-
-const DEFAULTS = {
-  unpaywallEmail:        "",
-  coreApiKey:            "",
-  institutionalProxyUrl: "",
-  enableCapesFallback:   true,
-  proxyUrl:              "",
-  fastMode:              true,
-  batchSize:             30,
-  requestDelayMs:        900,
-  domainGapMs:           1500,
-  antiCaptchaMode:       true,
-  requestTimeoutMs:      15000,
-  unpaywallTimeoutMs:    12000,
-  crossrefTimeoutMs:     10000
-};
-
-
-//Acesso direto ao Zotero
-function pget(k) { 
-  const val = Zotero.Prefs.get(PREF_PREFIX + k, true);
-  return val !== undefined ? val : DEFAULTS[k]; 
-}
-function pset(k,v) { Zotero.Prefs.set(PREF_PREFIX + k, v, true); }
-// Sensitive credentials are stored in the Login Manager (encrypted), never
-// in plain-text prefs.  Fall back to "" when the bridge is unavailable.
-function pSecureGet(k) { 
-  return (typeof ZotFetchPrefs !== "undefined" && ZotFetchPrefs.getSecure) ? ZotFetchPrefs.getSecure(k) : ""; 
-}
-function pSecureSet(k,v){ 
-  if (typeof ZotFetchPrefs !== "undefined" && ZotFetchPrefs.setSecure) ZotFetchPrefs.setSecure(k, v); 
-}
-
-function g(id)         { return document.getElementById(id); }
-
-// ── Load current values ─────────────────────────────────────────────────
-function load() {
-  const addonVersion = Zotero.Plugins ? Zotero.Plugins.get("zotfetch@edslab.research")?.version : "";
-  if (addonVersion) g("ver").textContent = `v${addonVersion}`;
-
-  g("f-email").value         = pSecureGet("unpaywallEmail")        || "";
-  g("f-core").value          = pSecureGet("coreApiKey")            || "";
-  g("f-proxy").value         = pSecureGet("institutionalProxyUrl") || "";
-  g("f-capes-on").checked    = pget("enableCapesFallback") !== false;
-  g("f-capes-url").value     = pSecureGet("proxyUrl")              || "";
-  g("f-fast").checked        = pget("fastMode")              !== false;
-  g("f-batch").value         = pget("batchSize")             ?? 30;
-  g("f-delay").value         = pget("requestDelayMs")        ?? 900;
-  g("f-gap").value           = pget("domainGapMs")           ?? 1500;
-  g("f-anticaptcha").checked = pget("antiCaptchaMode")       !== false;
-  g("f-timeout").value       = pget("requestTimeoutMs")      ?? 15000;
-  g("f-uptimeout").value     = pget("unpaywallTimeoutMs")    ?? 12000;
-  g("f-crtimeout").value     = pget("crossrefTimeoutMs")     ?? 10000;
-
-  syncCapes();
-}
-
-// ── CAPES section gating ────────────────────────────────────────────────
-function syncCapes() {
-  var on = g("f-capes-on").checked;
-  g("capes-block").style.opacity = on ? "1" : "0.4";
-  g("f-capes-url").disabled      = !on;
-}
-g("f-capes-on").addEventListener("change", syncCapes);
-
-// ── Validation ──────────────────────────────────────────────────────────
-function showError(msg) {
-  var el = g("errMsg");
-  el.textContent = `\u26A0 ${msg}`;
-  el.style.display = "block";
-  el.scrollIntoView({ behavior: "smooth", block: "nearest" });
-}
-function clearError() {
-  var el = g("errMsg");
-  el.style.display = "none";
-  el.textContent = "";
-}
-
-function validate() {
-  var email = g("f-email").value.trim();
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    g("f-email").focus();
-    showError("Please enter a valid email address, or leave it empty to use the built-in fallback.");
-    return false;
-  }
-  var numRules = [
-    ["f-batch",    "Batch size",             1,   500],
-    ["f-delay",    "Delay between items",    0, 30000],
-    ["f-gap",      "Domain gap",             0, 30000],
-    ["f-timeout",  "Request timeout",     5000, 120000],
-    ["f-uptimeout","Unpaywall timeout",   5000,  60000],
-    ["f-crtimeout","CrossRef timeout",    5000,  60000]
-  ];
-  for (var i = 0; i < numRules.length; i++) {
-    var rule  = numRules[i];
-    var val   = parseInt(g(rule[0]).value, 10);
-    if (Number.isNaN(val) || val < rule[2] || val > rule[3]) {
-      g(rule[0]).focus();
-      showError(`${rule[1]} must be a number between ${rule[2]} and ${rule[3]}.`);
-      return false;
-    }
-  }
-  return true;
-}
-
-// ── Save ────────────────────────────────────────────────────────────────
-function savePrefs() {
-  clearError();
-  if (!validate()) return;
-
-  pSecureSet("unpaywallEmail",        g("f-email").value.trim());
-  pSecureSet("coreApiKey",            g("f-core").value.trim());
-  pSecureSet("institutionalProxyUrl", g("f-proxy").value.trim());
-  pset("enableCapesFallback",         g("f-capes-on").checked);
-  pSecureSet("proxyUrl",              g("f-capes-url").value.trim());
-  pset("fastMode",              g("f-fast").checked);
-  pset("batchSize",             parseInt(g("f-batch").value,     10));
-  pset("requestDelayMs",        parseInt(g("f-delay").value,     10));
-  pset("domainGapMs",           parseInt(g("f-gap").value,       10));
-  pset("antiCaptchaMode",       g("f-anticaptcha").checked);
-  pset("requestTimeoutMs",      parseInt(g("f-timeout").value,   10));
-  pset("unpaywallTimeoutMs",    parseInt(g("f-uptimeout").value,  10));
-  pset("crossrefTimeoutMs",     parseInt(g("f-crtimeout").value,  10));
-
-  window.close();
-}
-
-// ── Reset Defaults ──────────────────────────────────────────────────────
-function resetDefaults() {
-  if (!window.confirm("Reset all ZotFetch settings to their default values?\nThis cannot be undone.")) return;
-  g("f-email").value         = DEFAULTS.unpaywallEmail;
-  g("f-core").value          = DEFAULTS.coreApiKey;
-  g("f-proxy").value         = DEFAULTS.institutionalProxyUrl;
-  g("f-capes-on").checked    = DEFAULTS.enableCapesFallback;
-  g("f-capes-url").value     = DEFAULTS.proxyUrl;
-  g("f-fast").checked        = DEFAULTS.fastMode;
-  g("f-batch").value         = DEFAULTS.batchSize;
-  g("f-delay").value         = DEFAULTS.requestDelayMs;
-  g("f-gap").value           = DEFAULTS.domainGapMs;
-  g("f-anticaptcha").checked = DEFAULTS.antiCaptchaMode;
-  g("f-timeout").value       = DEFAULTS.requestTimeoutMs;
-  g("f-uptimeout").value     = DEFAULTS.unpaywallTimeoutMs;
-  g("f-crtimeout").value     = DEFAULTS.crossrefTimeoutMs;
-  syncCapes();
-  clearError();
-}
-
-// ── Keyboard shortcuts ──────────────────────────────────────────────────
-window.addEventListener("DOMContentLoaded", load);
-window.addEventListener("keydown", (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); savePrefs(); }
-  if (e.key === "Escape") window.close();
-});
-// ── Help ────────────────────────────────────────────────────────────────────
-function openHelp() {
-  var url = "https://github.com/fdossi/zotfetch/wiki";
-  try {
-    // Zotero 8 cross-platform launcher
-    if (typeof Zotero !== "undefined" && Zotero.launchURL) {
-      Zotero.launchURL(url);
-    } else {
-      // Fallback: use the opener chrome window's launchURL
-      var win = window.opener ||
-        (window.arguments?.[0]?._chromeWin);
-      if (win?.Zotero?.launchURL) {
-        win.Zotero.launchURL(url);
-      } else {
-        window.open(url, "_blank");
-      }
-    }
-  } catch(e) {
-    window.open(url, "_blank");
-  }
-}
-
-window.addEventListener("DOMContentLoaded", () => {
-  setTimeout(() => {
-  load();
-}, 50);;
-});
-  ]]></html:script>
 </html:div>
 </vbox>

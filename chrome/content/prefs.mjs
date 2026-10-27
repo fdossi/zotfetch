@@ -1,7 +1,4 @@
 // chrome/content/prefs.mjs
-/** biome-ignore-all lint/suspicious/useIterableCallbackReturn: This would imply a total tewrite uneceesarilyy */
-/** biome-ignore-all lint/correctness/noUnusedVariables: cloneInto é OBRIGATÓRIO para o XHTML conseguir ler o prefsBridge */
-/** biome-ignore-all lint/complexity/noStaticOnlyClass: This would imply a total tewrite uneceesarilyy */
 // Preferences manager
 
 const PREF_PREFIX = 'extensions.zotfetch.';
@@ -39,14 +36,15 @@ const SecureStorage = (() => {
   return {
     /**
      * Retrieve the stored credential for `key`.
-     * Returns "" when not found or on error.
+     * Returns "" when not found. Callers can request an exception on error.
      */
-    get(key) {
+    get(key, throwOnError = false) {
       try {
         const logins = _mgr().findLogins(HOST, null, REALM);
         return logins.find(l => l.username === key)?.password ?? "";
       } catch (e) {
         Zotero.debug(`[ZotFetch][SecureStorage] get(${key}) error: ${e.message}`);
+        if (throwOnError) throw e;
         return "";
       }
     },
@@ -58,15 +56,20 @@ const SecureStorage = (() => {
     set(key, value) {
       try {
         const mgr = _mgr();
-        // Remove all existing entries for this key first (guards against
-        // duplicate entries that could accumulate from unexpected failures).
-        mgr.findLogins(HOST, null, REALM)
-          .filter(l => l.username === key)
-          .forEach(l => mgr.removeLogin(l));
-        if (value !== null && value !== undefined && value !== "")
+        const existing = mgr.findLogins(HOST, null, REALM)
+          .filter(l => l.username === key);
+        if (value === null || value === undefined || value === "") {
+          existing.forEach(l => mgr.removeLogin(l));
+        } else if (existing.length) {
+          mgr.modifyLogin(existing[0], _makeInfo(key, String(value)));
+          existing.slice(1).forEach(l => mgr.removeLogin(l));
+        } else {
           mgr.addLogin(_makeInfo(key, String(value)));
+        }
+        return true;
       } catch (e) {
         Zotero.logError(e);
+        return false;
       }
     },
 
@@ -80,7 +83,7 @@ const SecureStorage = (() => {
         const val = Zotero.Prefs.get(PREF_PREFIX + prefKey, true);
         if (!val) return;                        // nothing to migrate
         if (this.get(storageKey)) return;        // already stored securely
-        this.set(storageKey, val);
+        if (!this.set(storageKey, val) || this.get(storageKey) !== String(val)) return;
         Zotero.Prefs.set(PREF_PREFIX + prefKey, "", true); // wipe plain text
         Zotero.debug(`[ZotFetch][SecureStorage] Migrated '${prefKey}' from plain prefs`);
       } catch (e) {
@@ -159,57 +162,42 @@ class ZotFetchPrefs {
   
   // Secure key exposure
   static getSecure(key) {
-  return SecureStorage.get(key);
+    return SecureStorage.get(key, true);
   }
 
   static setSecure(key, value) {
-  SecureStorage.set(key, value);
+    return SecureStorage.set(key, value);
+  }
+
+  static setSecureBatch(values) {
+    const previous = new Map();
+    const changed = [];
+    try {
+      for (const [key, value] of Object.entries(values)) {
+        previous.set(key, SecureStorage.get(key, true));
+        changed.push(key);
+        if (!SecureStorage.set(key, value)) throw new Error("Secure storage write failed");
+      }
+      return true;
+    } catch (error) {
+      Zotero.logError(error);
+      for (const key of changed.reverse()) {
+        if (!SecureStorage.set(key, previous.get(key))) {
+          Zotero.logError(new Error(`Secure storage rollback failed for ${key}`));
+        }
+      }
+      return false;
+    }
   }
 
   static set(key, value) {
     Zotero.Prefs.set(PREF_PREFIX + key, value, true);
   }
 
-  /**
-   * Open the graphical ZotFetch preferences dialog.
-   * Reads and writes directly to/from Zotero.Prefs via a bridge object
-   * passed to the XHTML dialog through window.arguments[0].
-   */
-  static async openPrefsDialog() {
+  /** Open the registered ZotFetch pane in Zotero's preferences window. */
+  static openPrefsDialog() {
     try {
-      const win = Zotero.getMainWindow?.() ?? Zotero.getMainWindows?.()?.[0];
-      if (!win) {
-        Zotero.logError(new Error("[ZotFetch] openPrefsDialog: no main window available"));
-        return;
-      }
-      
-      const { AddonManager } = ChromeUtils.importESModule("resource://gre/modules/AddonManager.sys.mjs");
-      const addon = await AddonManager.getAddonByID("zotfetch@edslab.research");
-      const dialogUrl = addon.getResourceURI("chrome/content/prefs-dialog.xhtml").spec;
-
-      // Bridge object: isolates the dialog from direct Zotero.Prefs access and
-      // lets us pass functions across the chrome window boundary safely.
-      const prefsBridge = {
-        version: ZotFetchPlugin?.version || "",
-        get:       (key)        => Zotero.Prefs.get(PREF_PREFIX + key, true),
-        set:       (key, value) => Zotero.Prefs.set(PREF_PREFIX + key, value, true),
-        // Sensitive fields are read/written via SecureStorage (Login Manager).
-        secureGet: (key)        => SecureStorage.get(key),
-        secureSet: (key, value) => SecureStorage.set(key, value)
-      };
-      
-      const clonedBridge = Components.utils.cloneInto(prefsBridge, win, { 
-        cloneFunctions: true 
-      });
-      //const argArray = Cc["@mozilla.org/array;1"].createInstance(Ci.nsIMutableArray);
-      //argArray.appendElement(clonedBridge);
-      Services.ww.openWindow(
-        win,
-        dialogUrl,
-        "zotfetch-preferences",
-        "chrome,dialog=yes,centerscreen,resizable=yes,width=680,height=570",
-        null // Sem argumentos! A ponte está no opener.
-      );
+      Zotero.Utilities.Internal.openPreferences("zotfetch-preferences");
     } catch (error) {
       Zotero.logError(error);
     }

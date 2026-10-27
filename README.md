@@ -2,9 +2,9 @@
 
 [![DOI](https://zenodo.org/badge/1186582529.svg)](https://doi.org/10.5281/zenodo.19149482)
 
-**Author:** Fabio Dossi &nbsp;|&nbsp; **Version:** 1.5.0 &nbsp;|&nbsp; [📖 User Manual (Wiki)](https://github.com/fdossi/zotfetch/wiki)
+**Author:** Fabio Dossi &nbsp;|&nbsp; **Version:** 1.6.6 &nbsp;|&nbsp; [📖 User Manual (Wiki)](https://github.com/fdossi/zotfetch/wiki)
 
-**ZotFetch** is a [Zotero 8](https://www.zotero.org/) plugin that automatically downloads PDFs for multiple library items in a single operation. It uses a modular two-stage pipeline — **source resolution** then **PDF extraction** — so that landing pages from publishers, proxies, and repositories are correctly resolved to their actual PDF URL before import.
+**ZotFetch** is a [Zotero](https://www.zotero.org/) plugin that automatically downloads PDFs for multiple library items in a single operation. It uses a modular two-stage pipeline — **source resolution** then **PDF extraction** — so that landing pages from publishers, proxies, and repositories are correctly resolved to their actual PDF URL before import.
 
 ---
 
@@ -13,9 +13,9 @@
 - **Two-stage pipeline**: SourceResolver → PDFResolver → AttachmentImporter. Landing pages are never accidentally imported as PDFs.
 - **Multi-source download**: Native OA → Unpaywall → Semantic Scholar → OpenAlex → Europe PMC → CORE → OA Repository (+ arXiv direct-pdf) → Zotero Native DOI → DOI Landing → Institutional Proxy → CAPES
 - **PMCID support**: extracts `PMCID: PMCxxxxxxx` from item metadata for an instant Europe PMC fast path — no API call needed
-- **HTML-to-PDF extraction**: publisher-specific rules (Springer, Nature, Wiley, Taylor & Francis, ACS, Royal Society of Chemistry, SAGE, Oxford University Press, IEEE, MDPI, Frontiers, Elsevier/ScienceDirect, SciELO.br), a generic HTML extractor, or a **Gecko hidden browser** that automatically solves Cloudflare/Akamai JS challenges
-- **Fast Mode**: Two-pass strategy — lightweight open-access sources first, institutional fallbacks only for unresolved items
-- **Ultra Fast Mode**: Single-pass, maximum speed, prioritises open-access sources
+- **HTML-to-PDF extraction**: publisher-specific rules (Springer, Nature, Wiley, Taylor & Francis, ACS, Royal Society of Chemistry, SAGE, Oxford University Press, IEEE, MDPI, Frontiers, Elsevier/ScienceDirect, SciELO.br), a generic HTML extractor, and a Gecko hidden browser for JavaScript-rendered pages
+- **Fast Mode**: Two-pass strategy — fast sources, including Sci-Hub and institutional proxy, first; CAPES for unresolved items
+- **Ultra Fast Mode**: Single pass through fast sources, without the CAPES fallback
 - **Adaptive rate limiting**: Per-domain request spacing with exponential backoff on failures
 - **Anti-captcha protection**: Tracks consecutive captcha hits per domain; blocks domain after 3 hits, resets on success
 - **DOI lookup**: Automatically resolves missing DOIs via CrossRef before attempting downloads
@@ -42,8 +42,8 @@ Requirements: Python 3.8+
 
 ```bash
 git clone https://github.com/fdossi/zotfetch.git
-cd autoPDFdownloader
-python build.py --clean
+cd zotfetch
+python build.py
 ```
 
 This creates `zotfetch-X.Y.Z.xpi`. Install it via the steps above.
@@ -57,10 +57,10 @@ Select one or more items in your Zotero library, then right-click and hover over
 | Command | Description |
 |---|---|
 | **Batch Download** | Downloads PDFs for all selected items using all sources (two-pass if Fast Mode is on) |
-| **Ultra Fast** | Single-pass, fastest mode — open-access sources only. May download fewer PDFs than Batch Download. |
+| **Ultra Fast** | Single pass through fast sources, without CAPES. May download fewer PDFs than Batch Download. |
 | **Retry Failed** | Re-attempts only items that failed in the most recent batch |
 | **Retry After Auth** | Opens up to 3 DOI URLs in your browser for manual login/captcha, then retries blocked items |
-| **Preferences** | Opens the graphical Preferences dialog |
+| **Preferences** | Opens the ZotFetch pane in Zotero Settings |
 
 ---
 
@@ -82,9 +82,13 @@ ZotFetch tries sources in this order of priority:
 | 75–72 | **Institutional Proxy** | DOI routed through your proxy; also routes Semantic Scholar PDF URLs through the proxy |
 | 70 | **CAPES** | Brazilian CAPES portal or custom DOI proxy URL |
 
-In **Fast Mode**, sources 110–75 run in Pass 1; unresolved items proceed to Pass 2 (CAPES and institutional fallbacks). In **Ultra Fast Mode**, all sources run in a single pass.
+In **Fast Mode**, all fast sources run in Pass 1; unresolved items proceed to Pass 2 (CAPES). In **Ultra Fast Mode**, fast sources run in a single pass without CAPES. With Fast Mode disabled, Batch Download tries CAPES in the same pass as the other sources.
 
 > **Note:** Additional fallback sources can be enabled in `about:config`. See the Configuration section for available options.
+
+### Sci-Hub and Sci-PDF
+
+ZotFetch tries its own Sci-Hub mirrors for items with a DOI. If those and the other configured sources fail, it can make one final native Zotero attempt using Sci-PDF's custom resolvers. This optional fallback runs only when Sci-PDF (`scipdf@ytshen.com`) is active and every configured Zotero custom resolver matches Sci-PDF's Sci-Hub format. It is skipped after a Sci-Hub authentication, rate-limit, or CAPTCHA challenge, and in the CAPES-only fallback pass. ZotFetch never changes Zotero's custom resolver preference.
 
 ### HTML-to-PDF extraction (landing pages)
 
@@ -92,7 +96,7 @@ When a source returns a landing page URL (not a direct PDF), ZotFetch tries to f
 
 1. **Publisher-specific rule** (Springer, Nature, Wiley, Taylor & Francis, ACS, Royal Society of Chemistry, SAGE, Oxford University Press, IEEE, MDPI, Frontiers, Elsevier/ScienceDirect, SciELO.br)
 2. **Generic HTML extractor**: `<meta name="citation_pdf_url">`, `<link rel="alternate" type="application/pdf">`, `<iframe>` / `<embed>` / `<object>` with PDF src, `<a>` links to `.pdf` or with "Download PDF" text
-3. **Gecko hidden browser** (`Zotero.HTTP.processDocuments`): for URLs where steps 1–2 failed, loads the page in a full hidden Firefox engine. Automatically passes Cloudflare "Just a moment…" and Akamai Bot Manager JS challenges. Publisher-specific rules and generic extraction are then re-applied on the fully rendered DOM.
+3. **Gecko hidden browser** (`Zotero.HTTP.processDocuments`): for URLs where steps 1–2 failed, loads JavaScript-rendered pages and reapplies extraction rules. It does not solve human verification challenges.
 
 Each candidate URL is validated by a HEAD request confirming `Content-Type: application/pdf` before the file is imported.
 
@@ -100,13 +104,15 @@ Each candidate URL is validated by a HEAD request confirming `Content-Type: appl
 
 ## Configuration
 
-Open the graphical settings dialog via **right-click → ZotFetch ▶ → Preferences**. It covers all options grouped into sections — no need to use `about:config`.
+Open the ZotFetch settings pane via **right-click → ZotFetch ▶ → Preferences**, or from Zotero Settings.
 
 Click **? Help** in the dialog to open the [User Manual](https://github.com/fdossi/zotfetch/wiki) with detailed setup instructions for institutional proxy and CAPES.
 
-All preferences are also editable directly in **`about:config`** (Zotero's advanced config editor, **Edit → Settings → Advanced → Config Editor**), filtering by `extensions.zotfetch`.
+Non-sensitive preferences are also editable in **`about:config`** (Zotero's advanced config editor, **Edit → Settings → Advanced → Config Editor**), filtering by `extensions.zotfetch`.
 
 > **Security note (v1.4.3+):** Sensitive credentials — email, API key, and proxy URLs — are stored in Zotero's encrypted Login Manager, **not** in `about:config`. Use the **Preferences dialog** to set or change them; editing the `extensions.zotfetch.*` pref keys for these fields in `about:config` has no effect.
+
+**Security in 1.6.6:** ZotFetch checks URL schemes and addresses before network requests, inspects HTTP and HTML redirects, and imports validated PDF bytes without a second URL download. The institutional/CAPES private-network exception applies only to the configured proxy host. The hidden browser is limited to known publisher domains. DNS is checked before ZotFetch-managed requests, but a second lookup during connection can still change the address; native Zotero acquisition paths have their own network behavior. Zotero's HTTP layer may record request URLs in its debug log, so review logs before sharing them if links contain access tokens or personal information.
 
 | Preference key | Default | Description |
 |---|---|---|
@@ -189,7 +195,7 @@ ZotFetch tracks request history per domain:
 
 ## Requirements
 
-- **Zotero 8.0.4** or later (not compatible with Zotero 7 or earlier)
+- **Zotero 8.0.4–10.0.x** declared in the manifest. The author has manually confirmed that 1.6.6 works on Zotero 10.0.6; Zotero 8 and 9 have not been retested for this release.
 - A registered email address for [Unpaywall](https://unpaywall.org/) (free, no sign-up required — just a valid email in the preferences)
 
 ---
@@ -197,7 +203,7 @@ ZotFetch tracks request history per domain:
 ## Known Limitations
 
 - **Captcha-blocked sessions**: When a publisher serves a captcha, use **ZotFetch ▶ Retry After Auth** to open the URL in your browser, solve the captcha, then retry.
-- **JavaScript-rendered publisher pages**: ZotFetch now includes a Gecko hidden browser (`HiddenBrowserPDFResolver`) as the last-resort resolver. It runs a full Firefox engine, automatically passing Cloudflare "Just a moment…" and Akamai Bot Manager JS challenges. Only human-verification CAPTCHAs (reCAPTCHA checkbox, hCaptcha image grids) still require manual intervention via **Retry After Auth**.
+- **JavaScript-rendered publisher pages**: the hidden browser is a last-resort resolver. Protected pages and human-verification CAPTCHAs can still fail and require manual intervention via **Retry After Auth**.
 - **Paywalled content without proxy**: Without an institutional proxy configured, ZotFetch can only retrieve freely available (OA) versions of paywalled articles.
 
 ---
@@ -220,8 +226,13 @@ THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPL
 
 ## Changelog
 
+### v1.6.6 — Network and logging safeguards
+- Validate each HTTP and HTML redirect before following it; reject private DNS answers before ZotFetch-managed requests.
+- Strip authentication headers on cross-origin redirects and keep the private-network exception scoped to the configured proxy host.
+- Import validated PDF bytes directly; restrict hidden-browser navigation to known publisher domains; omit URL paths and query strings from ZotFetch logs.
+
 ### v1.4.3 — Encrypted credential storage + paywalled-items advisory
-- **Security**: Sensitive credentials (email, API key, institutional proxy URL, CAPES URL) are now stored in Zotero's **encrypted Login Manager** (`nsILoginManager`) instead of plain-text SQLite prefs. Credentials are protected by the OS keychain or Zotero master password.
+- **Security**: Sensitive credentials (email, API key, institutional proxy URL, CAPES URL) are stored in Zotero's Login Manager (`nsILoginManager`) instead of plain-text SQLite prefs. Protection depends on the Zotero profile configuration.
 - **Migration**: On first startup after upgrading, any existing plain-text pref values are automatically migrated to SecureStorage and wiped from `extensions.zotfetch.*` prefs — no user action required.
 - **New**: After a batch run, if items failed due to subscription walls and no institutional access method is configured, ZotFetch now shows a clear alert listing affected titles with actionable next-steps (configure proxy / run Retry Failed on VPN).
 - **Fix**: SemanticScholar API User-Agent now reports the current plugin version (`ZotFetch/1.4.3`) instead of a hardcoded stale string.

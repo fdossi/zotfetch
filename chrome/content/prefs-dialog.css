@@ -1,36 +1,24 @@
-/* chrome/content/prefs-dialog.mjs
-Took from the old XHTML for better work
-CSS */
+/* Styles are confined to the ZotFetch preferences fragment. */
+#zotfetch-prefs-root, #zotfetch-prefs-root *,
+#zotfetch-prefs-root *::before, #zotfetch-prefs-root *::after {
+  box-sizing: border-box;
+}
 
-*, 
-*::before, 
-*::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-:root { color-scheme: light dark; }
-
-body {
+#zotfetch-prefs-root {
+  color-scheme: light dark;
   font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   font-size: 13px;
-  background: Canvas;
-  color: CanvasText;
+  background: #f9f9f9;
+  color: #333333;
   padding: 18px 22px 14px;
-  min-width: 570px;
-  max-width: 680px;
-  background: #f9f9f9; 
-  color: #333333; 
-  padding: 18px 22px 14px;
-  min-width: 570px;
   max-width: 680px;
   overflow-x: hidden;
 }
 
 @media (prefers-color-scheme: dark) {
-body {
-  background: #2b2b2b;
-  color: #e0e0e0;     
+  #zotfetch-prefs-root { background: #2b2b2b; color: #e0e0e0; }
 }
-}
-h1 {
+#zotfetch-prefs-root h1 {
   font-size: 15px;
   font-weight: 700;
   display: flex;
@@ -41,9 +29,9 @@ h1 {
   border-bottom: 1px solid ButtonFace;
 }
 
-h1 small { font-size: 11px; font-weight: 400; color: GrayText; }
+#zotfetch-prefs-root h1 small { font-size: 11px; font-weight: 400; color: GrayText; }
 
-h2 {
+#zotfetch-prefs-root h2 {
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.07em;
@@ -54,18 +42,19 @@ h2 {
   border-bottom: 1px solid ButtonFace;
 }
 
-section { margin-bottom: 16px; }
-.field { margin-bottom: 10px; }
-.field > label {
+#zotfetch-prefs-root section { margin-bottom: 16px; }
+#zotfetch-prefs-root .field { margin-bottom: 10px; }
+#zotfetch-prefs-root .field > label {
   display: block;
   font-weight: 600;
   font-size: 12.5px;
   margin-bottom: 4px;
 }
 
-input[type="text"],
-input[type="email"],
-input[type="number"] {
+#zotfetch-prefs-root input[type="text"],
+#zotfetch-prefs-root input[type="email"],
+#zotfetch-prefs-root input[type="password"],
+#zotfetch-prefs-root input[type="number"] {
   display: block;
   width: 100%;
   padding: 5px 8px;
@@ -78,16 +67,16 @@ input[type="number"] {
   outline: none;
 }
 
-input:focus { outline: 2px solid Highlight; outline-offset: -1px; }
-input:disabled { opacity: 0.4; }
-.hint {
+#zotfetch-prefs-root input:focus { outline: 2px solid Highlight; outline-offset: -1px; }
+#zotfetch-prefs-root input:disabled { opacity: 0.4; }
+#zotfetch-prefs-root .hint {
   font-size: 11px;
   color: GrayText;
   margin-top: 4px;
   line-height: 1.55;
 }
 
-.hint code, .fbox code {
+#zotfetch-prefs-root .hint code, #zotfetch-prefs-root .fbox code {
   background: ButtonFace;
   color: CanvasText;
   padding: 1px 4px;
@@ -96,24 +85,24 @@ input:disabled { opacity: 0.4; }
   font-family: "Consolas", "Courier New", monospace;
 }
 
-.row {
+#zotfetch-prefs-root .row {
   display: flex;
   align-items: flex-start;
   gap: 8px;
   margin-bottom: 8px;
 }
 
-.row input[type="checkbox"] {
+#zotfetch-prefs-root .row input[type="checkbox"] {
   width: 14px; height: 14px;
   margin-top: 1px;
   flex-shrink: 0;
   cursor: pointer;
 }
 
-.row label { font-size: 13px; cursor: pointer; line-height: 1.4; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }
-details { margin-bottom: 2px; }
-details > summary {
+#zotfetch-prefs-root .row label { font-size: 13px; cursor: pointer; line-height: 1.4; }
+#zotfetch-prefs-root .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }
+#zotfetch-prefs-root details { margin-bottom: 2px; }
+#zotfetch-prefs-root details > summary {
   cursor: pointer;
   font-size: 11px;
   font-weight: 600;
@@ -126,22 +115,22 @@ details > summary {
   user-select: none;
 }
 
-details > summary::-webkit-details-marker { display: none; }
-details > summary::before {
+#zotfetch-prefs-root details > summary::-webkit-details-marker { display: none; }
+#zotfetch-prefs-root details > summary::before {
   content: "▶";
   font-size: 8px;
   display: inline-block;
   transition: transform 0.12s;
 }
 
-details[open] > summary::before { transform: rotate(90deg); }
-.section-sep {
+#zotfetch-prefs-root details[open] > summary::before { transform: rotate(90deg); }
+#zotfetch-prefs-root .section-sep {
   border: none;
   border-top: 1px solid ButtonFace;
   margin: 12px 0 10px;
 }
 
-.fbox {
+#zotfetch-prefs-root .fbox {
   background: ButtonFace;
   border-radius: 5px;
   padding: 9px 12px;
@@ -150,7 +139,7 @@ details[open] > summary::before { transform: rotate(90deg); }
   line-height: 1.65;
 }
 
-.fbox p {
+#zotfetch-prefs-root .fbox p {
   font-weight: 700;
   font-size: 10px;
   text-transform: uppercase;
@@ -159,9 +148,9 @@ details[open] > summary::before { transform: rotate(90deg); }
   margin-bottom: 5px;
 }
 
-.fbox ul { padding-left: 18px; }
-.fbox li { margin-bottom: 2px; }
-.note-info {
+#zotfetch-prefs-root .fbox ul { padding-left: 18px; }
+#zotfetch-prefs-root .fbox li { margin-bottom: 2px; }
+#zotfetch-prefs-root .note-info {
   background: #eaf4fb;
   color: #1a5276;
   border-left: 3px solid #3498db;
@@ -173,10 +162,10 @@ details[open] > summary::before { transform: rotate(90deg); }
 }
 
 @media (prefers-color-scheme: dark) {
-  .note-info { background: #1a2a38; color: #7ec8e3; border-color: #2980b9; }
+  #zotfetch-prefs-root .note-info { background: #1a2a38; color: #7ec8e3; border-color: #2980b9; }
 }
 
-.err-msg {
+#zotfetch-prefs-root .err-msg {
   display: none;
   background: #fde8e8;
   color: #7b241c;
@@ -188,11 +177,26 @@ details[open] > summary::before { transform: rotate(90deg); }
   line-height: 1.4;
 }
 
-@media (prefers-color-scheme: dark) {
-  .err-msg { background: #3a1010; color: #f1948a; border-color: #922b21; }
+#zotfetch-prefs-root .status-msg {
+  display: none;
+  background: #eaf4fb;
+  color: #1a5276;
+  border: 1px solid #b8d9ed;
+  border-radius: 4px;
+  padding: 7px 10px;
+  font-size: 12px;
+  margin-bottom: 12px;
 }
 
-.footer {
+@media (prefers-color-scheme: dark) {
+  #zotfetch-prefs-root .status-msg { background: #1a2a38; color: #7ec8e3; border-color: #2980b9; }
+}
+
+@media (prefers-color-scheme: dark) {
+  #zotfetch-prefs-root .err-msg { background: #3a1010; color: #f1948a; border-color: #922b21; }
+}
+
+#zotfetch-prefs-root .footer {
   display: flex;
   align-items: center;
   padding-top: 12px;
@@ -201,8 +205,8 @@ details[open] > summary::before { transform: rotate(90deg); }
   gap: 8px;
 }
 
-.footer .spacer { flex: 1; }
-button {
+#zotfetch-prefs-root .footer .spacer { flex: 1; }
+#zotfetch-prefs-root button {
   padding: 6px 18px;
   font-size: 13px;
   font-family: inherit;
@@ -214,11 +218,11 @@ button {
   white-space: nowrap;
 }
 
-button:hover { filter: brightness(0.92); }
-button.primary {
+#zotfetch-prefs-root button:hover { filter: brightness(0.92); }
+#zotfetch-prefs-root button.primary {
   background: Highlight;
   color: HighlightText;
   border-color: Highlight;
   font-weight: 700;
 }
-button.danger { color: #c0392b; }
+#zotfetch-prefs-root button.danger { color: #c0392b; }

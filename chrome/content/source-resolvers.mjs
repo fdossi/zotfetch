@@ -101,7 +101,7 @@ var UnpaywallSourceResolver = class {
     const url = `https://api.unpaywall.org/v2/${encodeURIComponent(ids.doi)}?email=${encodeURIComponent(email)}`;
 
     try {
-      const resp = await Zotero.HTTP.request("GET", url, {
+      const resp = await Utils.safeRequest("GET", url, {
         responseType: "json",
         timeout: ZotFetchPrefs.getUnpaywallTimeoutMs(),
         headers: Utils.getStealthHeaders()
@@ -159,7 +159,7 @@ var UnpaywallSourceResolver = class {
       } else {
         ZotFetch.cooldown.markDomainNonCaptcha("api.unpaywall.org");
       }
-      Zotero.logError(error);
+      Zotero.debug(Utils.errorForLog(error));
       return [];
     }
   }
@@ -183,7 +183,7 @@ var SemanticScholarSourceResolver = class {
 
     try {
       const url = `https://api.semanticscholar.org/graph/v1/paper/DOI:${encodeURIComponent(ids.doi)}?fields=openAccessPdf,externalIds`;
-      const resp = await Zotero.HTTP.request("GET", url, {
+      const resp = await Utils.safeRequest("GET", url, {
         responseType: "json",
         timeout: 10000,
         headers: { "User-Agent": `ZotFetch/${ZotFetchPlugin?.version || "1.4"} (mailto:zotfetch@gmail.com)` }
@@ -222,7 +222,7 @@ var SemanticScholarSourceResolver = class {
       return [];
     } catch (error) {
       ZotFetch.cooldown.markDomainNonCaptcha(domain);
-      Zotero.logError(error);
+      Zotero.debug(Utils.errorForLog(error));
       return [];
     }
   }
@@ -247,7 +247,7 @@ var OpenAlexSourceResolver = class {
     try {
       const email = ZotFetchPrefs.getUnpaywallEmail();
       const url = `https://api.openalex.org/works/https://doi.org/${encodeURI(ids.doi)}?select=open_access,best_oa_location&mailto=${encodeURIComponent(email)}`;
-      const resp = await Zotero.HTTP.request("GET", url, {
+      const resp = await Utils.safeRequest("GET", url, {
         responseType: "json",
         timeout: 10000
       });
@@ -285,7 +285,7 @@ var OpenAlexSourceResolver = class {
       }];
     } catch (error) {
       ZotFetch.cooldown.markDomainNonCaptcha(domain);
-      Zotero.logError(error);
+      Zotero.debug(Utils.errorForLog(error));
       return [];
     }
   }
@@ -320,7 +320,7 @@ var CoreSourceResolver = class {
       const q = encodeURIComponent(`doi:"${ids.doi}"`);
       const url = `https://api.core.ac.uk/v3/search/works?q=${q}&fields=downloadUrl,fullTextLink,links&limit=3`;
 
-      const resp = await Zotero.HTTP.request("GET", url, {
+      const resp = await Utils.safeRequest("GET", url, {
         responseType: "json",
         timeout: 12000,
         headers
@@ -388,7 +388,7 @@ var CoreSourceResolver = class {
       } else {
         ZotFetch.cooldown.markDomainNonCaptcha(domain);
       }
-      Zotero.logError(error);
+      Zotero.debug(Utils.errorForLog(error));
       return [];
     }
   }
@@ -436,7 +436,7 @@ var EuropePmcSourceResolver = class {
       const email = ZotFetchPrefs.getUnpaywallEmail();
       const url = `https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=${encodeURIComponent(query)}&format=json&resultType=core&pageSize=1&email=${encodeURIComponent(email)}`;
 
-      const resp = await Zotero.HTTP.request("GET", url, {
+      const resp = await Utils.safeRequest("GET", url, {
         responseType: "json",
         timeout: 10000,
         headers: { Accept: "application/json" }
@@ -490,7 +490,7 @@ var EuropePmcSourceResolver = class {
       } else {
         ZotFetch.cooldown.markDomainNonCaptcha(domain);
       }
-      Zotero.logError(error);
+      Zotero.debug(Utils.errorForLog(error));
       return [];
     }
   }
@@ -520,7 +520,7 @@ var InternetArchiveSourceResolver = class {
 
     try {
       const url = `https://api.fatcat.wiki/v0/release/lookup?doi=${encodeURIComponent(ids.doi)}&expand=files`;
-      const resp = await Zotero.HTTP.request("GET", url, {
+      const resp = await Utils.safeRequest("GET", url, {
         responseType: "json",
         timeout: 12000,
         headers: {
@@ -582,7 +582,7 @@ var InternetArchiveSourceResolver = class {
       } else {
         ZotFetch.cooldown.markDomainNonCaptcha(domain);
       }
-      Zotero.logError(error);
+      Zotero.debug(Utils.errorForLog(error));
       return [];
     }
   }
@@ -610,7 +610,7 @@ var PaperitySourceResolver = class {
 
     try {
       const url = `https://paperity.org/api/0.1/paper/doi/?doi=${encodeURIComponent(ids.doi)}&format=json`;
-      const resp = await Zotero.HTTP.request("GET", url, {
+      const resp = await Utils.safeRequest("GET", url, {
         responseType: "json",
         timeout: 10000,
         headers: { Accept: "application/json" }
@@ -654,7 +654,7 @@ var PaperitySourceResolver = class {
       } else {
         ZotFetch.cooldown.markDomainNonCaptcha(domain);
       }
-      Zotero.logError(error);
+      Zotero.debug(Utils.errorForLog(error));
       return [];
     }
   }
@@ -684,7 +684,7 @@ var OaMgSourceResolver = class {
     // Try OA.mg API first for direct PDF URLs
     try {
       const apiUrl = `https://api.oa.mg/work/doi/${encodeURIComponent(ids.doi)}`;
-      const resp = await Zotero.HTTP.request("GET", apiUrl, {
+      const resp = await Utils.safeRequest("GET", apiUrl, {
         responseType: "json",
         timeout: 10000,
         headers: Utils.getStealthHeaders()
@@ -745,7 +745,8 @@ var SciHubSourceResolver = class {
   async buildCandidates(_item, ids) {
     if (!ids.doi) return [];
 
-    // Sci-Hub mirrors (matching Sci-PDF plugin)
+    // ZotFetch's own mirrors; Sci-PDF's configured mirrors are used only by
+    // the optional native fallback in fetch.mjs.
     const mirrors = [
       "https://sci-hub.se",
       "https://sci-hub.st",
@@ -762,7 +763,7 @@ var SciHubSourceResolver = class {
     let priority = 80;
 
     for (const mirror of mirrors) {
-      const url = `${mirror}/${ids.doi}`;
+      const url = `${mirror.replace(/\/+$/, "")}/${ids.doi}`;
       candidates.push({
         sourceId: "scihub",
         label: "Sci-Hub",
@@ -797,7 +798,7 @@ var DoajSourceResolver = class {
 
     try {
       const url = `https://doaj.org/api/v2/search/articles/doi:${encodeURIComponent(ids.doi)}`;
-      const resp = await Zotero.HTTP.request("GET", url, {
+      const resp = await Utils.safeRequest("GET", url, {
         responseType: "json",
         timeout: 10000,
         headers: { Accept: "application/json" }
@@ -844,7 +845,7 @@ var DoajSourceResolver = class {
       } else {
         ZotFetch.cooldown.markDomainNonCaptcha(domain);
       }
-      Zotero.logError(error);
+      Zotero.debug(Utils.errorForLog(error));
       return [];
     }
   }
@@ -1014,7 +1015,7 @@ var InstitutionalProxySourceResolver = class {
       try {
         const email = ZotFetchPrefs.getUnpaywallEmail();
         const s2url = `https://api.semanticscholar.org/graph/v1/paper/DOI:${encodeURIComponent(ids.doi)}?fields=openAccessPdf`;
-        const resp = await Zotero.HTTP.request("GET", s2url, {
+        const resp = await Utils.safeRequest("GET", s2url, {
           responseType: "json",
           timeout: 8000,
           headers: { "User-Agent": `ZotFetch/${ZotFetchPlugin?.version || "1.4"} (mailto:${email})` }

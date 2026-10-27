@@ -23,8 +23,3 @@ Thumbs.db
 *.swo
 .vscode/settings.json
 node_modules/
-package-lock.json
-package.json
-
-# Monolithic HTML for conference
-*.html

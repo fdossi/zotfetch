@@ -1,9 +1,4 @@
-// chrome/content/prefs-dialog.mjs
-/** biome-ignore-all lint/correctness/noInnerDeclarations: This would imply a total tewrite uneceesarily */
-/** biome-ignore-all lint/suspicious/noRedundantUseStrict: This file is called inside a XHTML then the functions would be used so I cant garantee it would be safe */
-/** biome-ignore-all lint/correctness/noUnusedVariables: This file is called inside a XHTML then the functions would be used */
-//Took from the old XHTML for better work, but it needs to live inside there
-//It is responsible by organizing the whole keys and preferences
+// Loaded by Zotero.PreferencePanes in the pane's own global scope.
 
 "use strict";
 
@@ -24,35 +19,40 @@ const DEFAULTS = {
   unpaywallTimeoutMs:    12000,
   crossrefTimeoutMs:     10000
 };
+let secureReady = false;
 
 
-//Acesso direto ao Zotero
-function pget(k) { 
+function pget(k) {
   const val = Zotero.Prefs.get(PREF_PREFIX + k, true);
-  return val !== undefined ? val : DEFAULTS[k]; 
+  return val !== undefined ? val : DEFAULTS[k];
 }
 function pset(k,v) { Zotero.Prefs.set(PREF_PREFIX + k, v, true); }
-// Sensitive credentials are stored in the Login Manager (encrypted), never
-// in plain-text prefs.  Fall back to "" when the bridge is unavailable.
-function pSecureGet(k) { 
-  return (typeof ZotFetchPrefs !== "undefined" && ZotFetchPrefs.getSecure) ? ZotFetchPrefs.getSecure(k) : ""; 
+function securePrefs() {
+  if (!Zotero.ZotFetchPrefs) throw new Error("ZotFetch secure preferences are unavailable");
+  return Zotero.ZotFetchPrefs;
 }
-function pSecureSet(k,v){ 
-  if (typeof ZotFetchPrefs !== "undefined" && ZotFetchPrefs.setSecure) ZotFetchPrefs.setSecure(k, v); 
+function pSecureGet(k) {
+  return securePrefs().getSecure(k);
 }
 
-function g(id)         { return document.getElementById(id); }
+function g(id)         { return document.getElementById(`zotfetch-${id}`); }
 
 // ── Load current values ─────────────────────────────────────────────────
 function load() {
-  const addonVersion = Zotero.Plugins ? Zotero.Plugins.get("zotfetch@edslab.research")?.version : "";
-  if (addonVersion) g("ver").textContent = `v${addonVersion}`;
-
-  g("f-email").value         = pSecureGet("unpaywallEmail")        || "";
-  g("f-core").value          = pSecureGet("coreApiKey")            || "";
-  g("f-proxy").value         = pSecureGet("institutionalProxyUrl") || "";
+  secureReady = false;
+  try {
+    g("f-email").value         = pSecureGet("unpaywallEmail")        || "";
+    g("f-core").value          = pSecureGet("coreApiKey")            || "";
+    g("f-proxy").value         = pSecureGet("institutionalProxyUrl") || "";
+    g("f-capes-url").value     = pSecureGet("proxyUrl")              || "";
+    secureReady = true;
+    g("save").disabled = false;
+  } catch (error) {
+    g("save").disabled = true;
+    showError(error.message);
+    return;
+  }
   g("f-capes-on").checked    = pget("enableCapesFallback") !== false;
-  g("f-capes-url").value     = pSecureGet("proxyUrl")              || "";
   g("f-fast").checked        = pget("fastMode")              !== false;
   g("f-batch").value         = pget("batchSize")             ?? 30;
   g("f-delay").value         = pget("requestDelayMs")        ?? 900;
@@ -63,6 +63,18 @@ function load() {
   g("f-crtimeout").value     = pget("crossrefTimeoutMs")     ?? 10000;
 
   syncCapes();
+  clearStatus();
+}
+
+function initPrefsPane() {
+  g("f-capes-on").addEventListener("change", syncCapes);
+  g("help").addEventListener("click", openHelp);
+  g("reset").addEventListener("click", resetDefaults);
+  g("cancel").addEventListener("click", discardChanges);
+  g("save").addEventListener("click", savePrefs);
+  g("prefs-root").addEventListener("input", () => showStatus("Unsaved changes. Click Save to apply them."));
+  g("prefs-root").addEventListener("change", () => showStatus("Unsaved changes. Click Save to apply them."));
+  load();
 }
 
 // ── CAPES section gating ────────────────────────────────────────────────
@@ -71,7 +83,6 @@ function syncCapes() {
   g("capes-block").style.opacity = on ? "1" : "0.4";
   g("f-capes-url").disabled      = !on;
 }
-g("f-capes-on").addEventListener("change", syncCapes);
 
 // ── Validation ──────────────────────────────────────────────────────────
 function showError(msg) {
@@ -84,6 +95,21 @@ function clearError() {
   var el = g("errMsg");
   el.style.display = "none";
   el.textContent = "";
+}
+function showStatus(message) {
+  const el = g("statusMsg");
+  el.textContent = message;
+  el.style.display = "block";
+}
+function clearStatus() {
+  const el = g("statusMsg");
+  el.textContent = "";
+  el.style.display = "none";
+}
+function discardChanges() {
+  clearError();
+  load();
+  if (secureReady) showStatus("Changes discarded.");
 }
 
 function validate() {
@@ -103,8 +129,8 @@ function validate() {
   ];
   for (var i = 0; i < numRules.length; i++) {
     var rule  = numRules[i];
-    var val   = parseInt(g(rule[0]).value, 10);
-    if (Number.isNaN(val) || val < rule[2] || val > rule[3]) {
+    var val = Number(g(rule[0]).value);
+    if (!Number.isInteger(val) || val < rule[2] || val > rule[3]) {
       g(rule[0]).focus();
       showError(`${rule[1]} must be a number between ${rule[2]} and ${rule[3]}.`);
       return false;
@@ -116,13 +142,24 @@ function validate() {
 // ── Save ────────────────────────────────────────────────────────────────
 function savePrefs() {
   clearError();
+  if (!secureReady) {
+    showError("Secure settings could not be loaded. Reopen Zotero Settings before saving.");
+    return;
+  }
   if (!validate()) return;
 
-  pSecureSet("unpaywallEmail",        g("f-email").value.trim());
-  pSecureSet("coreApiKey",            g("f-core").value.trim());
-  pSecureSet("institutionalProxyUrl", g("f-proxy").value.trim());
+  try {
+    if (!securePrefs().setSecureBatch({
+      unpaywallEmail: g("f-email").value.trim(),
+      coreApiKey: g("f-core").value.trim(),
+      institutionalProxyUrl: g("f-proxy").value.trim(),
+      proxyUrl: g("f-capes-url").value.trim()
+    })) throw new Error("Could not save a secure setting");
+  } catch (error) {
+    showError(error.message);
+    return;
+  }
   pset("enableCapesFallback",         g("f-capes-on").checked);
-  pSecureSet("proxyUrl",              g("f-capes-url").value.trim());
   pset("fastMode",              g("f-fast").checked);
   pset("batchSize",             parseInt(g("f-batch").value,     10));
   pset("requestDelayMs",        parseInt(g("f-delay").value,     10));
@@ -132,12 +169,12 @@ function savePrefs() {
   pset("unpaywallTimeoutMs",    parseInt(g("f-uptimeout").value,  10));
   pset("crossrefTimeoutMs",     parseInt(g("f-crtimeout").value,  10));
 
-  window.close();
+  showStatus("Preferences saved.");
 }
 
 // ── Reset Defaults ──────────────────────────────────────────────────────
 function resetDefaults() {
-  if (!window.confirm("Reset all ZotFetch settings to their default values?\nThis cannot be undone.")) return;
+  if (!window.confirm("Load ZotFetch defaults into this form? Click Save to apply them.")) return;
   g("f-email").value         = DEFAULTS.unpaywallEmail;
   g("f-core").value          = DEFAULTS.coreApiKey;
   g("f-proxy").value         = DEFAULTS.institutionalProxyUrl;
@@ -153,13 +190,13 @@ function resetDefaults() {
   g("f-crtimeout").value     = DEFAULTS.crossrefTimeoutMs;
   syncCapes();
   clearError();
+  showStatus("Defaults loaded into the form. Click Save to apply them.");
 }
 
 // ── Keyboard shortcuts ──────────────────────────────────────────────────
-window.addEventListener("DOMContentLoaded", load);
 window.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); savePrefs(); }
-  if (e.key === "Escape") window.close();
+  if (e.key === "Escape") { e.preventDefault(); discardChanges(); }
 });
 // ── Help ────────────────────────────────────────────────────────────────────
 function openHelp() {
@@ -182,9 +219,3 @@ function openHelp() {
     window.open(url, "_blank");
   }
 }
-
-window.addEventListener("DOMContentLoaded", () => {
-  setTimeout(() => {
-  load();
-}, 50);;
-});
