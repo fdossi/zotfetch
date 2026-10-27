@@ -72,7 +72,7 @@ var Utils = {
     const normalize = (s) => String(s || '')
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
-      .replace(/[\-\u2013\u2014]/g, ' ')
+      .replace(/[-\u2013\u2014]/g, ' ')
       .replace(/[^a-z0-9\s]/g, '')
       .trim()
       .split(/\s+/)
@@ -100,8 +100,151 @@ var Utils = {
     try {
       return new URL(url).hostname.toLowerCase();
     } catch {
-      const match = String(url).match(/^https?:\/\/([^\/]+)/i);
+      const match = String(url).match(/^https?:\/\/([^/]+)/i);
       return match ? match[1] : '';
+    }
+  },
+
+  // Do not place paths, query strings, fragments or credentials in our logs.
+  urlForLog(url) {
+    try { return new URL(url).hostname.toLowerCase(); }
+    catch { return '[invalid URL]'; }
+  },
+
+  errorForLog(error) {
+    const status = Number(error?.status || error?.xmlhttp?.status) || 0;
+    const name = /^[A-Za-z][A-Za-z0-9]{0,39}$/.test(error?.name || '')
+      ? error.name : 'NetworkError';
+    return `${name}${status ? ` (HTTP ${status})` : ''}`;
+  },
+
+  isSafeDestinationURL(url, policy = {}) {
+    try {
+      const host = new URL(url).hostname.toLowerCase();
+      return this.isSafeNetworkURL(url,
+        !!policy.privateHost && host === policy.privateHost.toLowerCase());
+    } catch { return false; }
+  },
+
+  isTrustedBrowserHost(url) {
+    try {
+      const host = new URL(url).hostname.toLowerCase();
+      const domains = ['springer.com', 'nature.com', 'wiley.com',
+        'tandfonline.com', 'acs.org', 'rsc.org', 'sagepub.com',
+        'oup.com', 'ieee.org', 'mdpi.com', 'frontiersin.org',
+        'elsevier.com', 'sciencedirect.com', 'scielo.br', 'scielo.org',
+        'plos.org', 'elifesciences.org', 'biomedcentral.com',
+        'f1000research.com', 'peerj.com'];
+      return domains.some(domain => host === domain || host.endsWith(`.${domain}`));
+    } catch { return false; }
+  },
+
+  // DNS preflight rejects names that already resolve to non-public addresses.
+  // It is defense in depth: Gecko can still resolve again at connection time.
+  async checkDNSDestination(url, policy = {}) {
+    const host = new URL(url).hostname.replace(/^\[|\]$/g, '');
+    if (policy.privateHost && host.toLowerCase() === policy.privateHost.toLowerCase()) return;
+    if (typeof Services === 'undefined' || !Services.dns?.asyncResolve) return;
+    const addresses = await new Promise((resolve, reject) => {
+      Services.dns.asyncResolve(host, 0, 0, null, {
+        onLookupComplete(_request, record, status) {
+          if (status || !record) { reject(new Error('DNS lookup failed')); return; }
+          const found = [];
+          try { while (record.hasMore()) found.push(record.getNextAddrAsString()); }
+          catch (_) { /* end of record */ }
+          resolve(found);
+        }
+      }, Services.tm.mainThread);
+    });
+    if (!addresses.length || addresses.some(address =>
+      !this.isSafeNetworkURL(`http://${address.includes(':') ? `[${address}]` : address}/`))) {
+      throw new Error('Unsafe DNS destination');
+    }
+  },
+
+  // Zotero.HTTP.request follows redirects by default, including redirects to
+  // local hosts. Inspect every hop before the next request is sent.
+  async safeRequest(method, url, options = {}, policy = {}) {
+    let current = String(url);
+    const first = new URL(current);
+    policy = options.zotfetchPolicy || policy;
+    const { zotfetchPolicy: _ignored, ...requestOptions } = options;
+    const allowed = target => this.isSafeDestinationURL(target, policy);
+    if (!allowed(current)) throw new Error('Unsafe network destination');
+    let headers = { ...(options.headers || {}) };
+    for (let hop = 0; hop <= 5; hop++) {
+      await this.checkDNSDestination(current, policy);
+      const response = await Zotero.HTTP.request(method, current, {
+        ...requestOptions, headers, followRedirects: false,
+        // Zotero follows HTML meta-refresh internally for document responses.
+        ...(options.responseType === 'document' ? { numRedirects: 3 } : {})
+      });
+      const status = Number(response.status) || 200;
+      if (status < 300 || status >= 400) {
+        if (options.responseType === 'document' && response.responseXML) {
+          const meta = response.responseXML.querySelector?.('meta[http-equiv="refresh" i]');
+          const content = meta?.getAttribute('content') || '';
+          const match = content.match(/^\s*(?:[0-9]|1[0-5])\s*;\s*url\s*=\s*['"]?([^'"\s]+)['"]?/i);
+          if (match) {
+            if (hop === 5) throw new Error('Excessive HTML redirects');
+            const next = new URL(match[1], current);
+            if (!allowed(next.href) || (first.protocol === 'https:' && next.protocol !== 'https:')) {
+              throw new Error('Unsafe HTML redirect');
+            }
+            if (next.origin !== new URL(current).origin) {
+              headers = Object.fromEntries(Object.entries(headers).filter(([key]) =>
+                !/^(authorization|proxy-authorization|cookie|referer)$/i.test(key)));
+            }
+            current = next.href;
+            continue;
+          }
+        }
+        response.zotfetchFinalURL = current;
+        return response;
+      }
+      const location = response.getResponseHeader?.('Location');
+      if (!location || hop === 5) throw new Error('Unsafe or excessive HTTP redirects');
+      const next = new URL(location, current);
+      if (!allowed(next.href) || (first.protocol === 'https:' && next.protocol !== 'https:')) {
+        throw new Error('Unsafe network redirect');
+      }
+      if (next.origin !== new URL(current).origin) {
+        headers = Object.fromEntries(Object.entries(headers).filter(([key]) =>
+          !/^(authorization|proxy-authorization|cookie|referer)$/i.test(key)));
+      }
+      current = next.href;
+    }
+    throw new Error('Excessive HTTP redirects');
+  },
+
+  // Reject direct requests to local/private hosts supplied by third-party metadata.
+  // A user-configured institutional/CAPES proxy can opt in to a private address.
+  isSafeNetworkURL(url, allowPrivate = false) {
+    try {
+      const parsed = new URL(url);
+      if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname ||
+          parsed.username || parsed.password) return false;
+      if (allowPrivate) return true;
+      // A trailing DNS root dot and IPv4-mapped IPv6 addresses must not turn
+      // local endpoints into apparently public hostnames.
+      const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+      const isIPv6 = host.includes(':');
+      if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') ||
+          (isIPv6 && (host === '::1' || host === '::' || host.startsWith('fc') ||
+          host.startsWith('fd') || host.startsWith('fe8') || host.startsWith('fe9') ||
+          host.startsWith('fea') || host.startsWith('feb') || host.startsWith('::ffff:'))) ||
+          (!host.includes('.') && !host.includes(':'))) return false;
+      const parts = host.split('.');
+      if (parts.length === 4 && parts.every(p => /^\d+$/.test(p) && +p <= 255)) {
+        const [a, b] = parts.map(Number);
+        return !(a === 0 || a === 10 || a === 127 || a >= 224 ||
+          (a === 100 && b >= 64 && b <= 127) ||
+          (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
+          (a === 192 && b === 168));
+      }
+      return true;
+    } catch {
+      return false;
     }
   },
 

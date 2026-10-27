@@ -131,7 +131,7 @@ function getHostPolicy(domain) {
   const d = domain.toLowerCase();
   if (_PROTECTED_POLICIES[d]) return _PROTECTED_POLICIES[d];
   for (const [host, policy] of Object.entries(_PROTECTED_POLICIES)) {
-    if (d === host || d.endsWith("." + host)) return policy;
+    if (d === host || d.endsWith(`.${host}`)) return policy;
   }
   return null;
 }

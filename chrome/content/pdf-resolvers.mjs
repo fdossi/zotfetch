@@ -100,6 +100,20 @@ function _classifyHttpError(error) {
   return "network";
 }
 
+async function _pdfBlobHasSignature(blob) {
+  if (!blob || typeof blob.slice !== "function" || !blob.size) return false;
+  try {
+    const prefix = new Uint8Array(await blob.slice(0, 1024).arrayBuffer());
+    for (let i = 0; i <= prefix.length - 5; i++) {
+      if (prefix[i] === 37 && prefix[i + 1] === 80 && prefix[i + 2] === 68 &&
+          prefix[i + 3] === 70 && prefix[i + 4] === 45) return true;
+    }
+  } catch (_) {
+    // Keep URL import available if this host cannot expose the response blob.
+  }
+  return false;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // DirectPDFResolver
 // Used when candidate.kind === "direct-pdf".
@@ -117,16 +131,20 @@ var DirectPDFResolver = class {
     const t0 = Date.now();
     const domain = Utils.getDomain(candidate.url);
     const policy = ProtectedHosts.getHostPolicy(domain);
-    ctx.logger(`[DirectPDFResolver] Checking ${candidate.url.substring(0, 80)}`);
+    ctx.logger(`[DirectPDFResolver] Checking ${Utils.urlForLog(candidate.url)}`);
 
     // Skip HEAD for protected hosts: it frequently returns 405, wrong
     // Content-Type, or triggers bot detection without delivering a PDF.
-    const skipHead = policy && policy.allowHead === false;
+    // Zotero 10's importFromURL does not forward candidate headers. Fetch once
+    // with those headers and import the validated blob through Zotero storage.
+    const skipHead = (policy && policy.allowHead === false) ||
+      Object.keys(candidate.headers || {}).length > 0;
 
     if (!skipHead) {
       try {
-        const resp = await Zotero.HTTP.request("HEAD", candidate.url, {
+        const resp = await Utils.safeRequest("HEAD", candidate.url, {
           timeout: ctx.timeoutMs,
+          zotfetchPolicy: ctx.networkPolicy,
           headers: {
             ...Utils.getStealthHeaders(),
             ...(candidate.headers || {})
@@ -135,7 +153,8 @@ var DirectPDFResolver = class {
         const ct = resp.getResponseHeader?.("Content-Type") || "";
         if (/application\/pdf/i.test(ct)) {
           ctx.logger(`[DirectPDFResolver] HEAD confirmed PDF (${Date.now() - t0}ms)`);
-          return { ok: true, finalPdfUrl: candidate.url, method: "direct", headers: candidate.headers };
+          return { ok: true, finalPdfUrl: resp.zotfetchFinalURL || candidate.url,
+            method: "direct", headers: candidate.headers };
         }
       } catch (_) {
         // HEAD not supported or failed — continue to GET.
@@ -144,8 +163,10 @@ var DirectPDFResolver = class {
 
     // GET with Accept: application/pdf.
     try {
-      const resp = await Zotero.HTTP.request("GET", candidate.url, {
+      const resp = await Utils.safeRequest("GET", candidate.url, {
         timeout: ctx.timeoutMs,
+          zotfetchPolicy: ctx.networkPolicy,
+        responseType: "blob",
         headers: {
           ...Utils.getStealthHeaders({ isPdf: true }),
           ...(candidate.headers || {})
@@ -154,11 +175,14 @@ var DirectPDFResolver = class {
       const ct = resp.getResponseHeader?.("Content-Type") || "";
       if (/application\/pdf/i.test(ct)) {
         ctx.logger(`[DirectPDFResolver] GET confirmed PDF (${Date.now() - t0}ms)`);
-        return { ok: true, finalPdfUrl: candidate.url, method: "direct", headers: candidate.headers };
+        const pdfBlob = await _pdfBlobHasSignature(resp.response) ? resp.response : null;
+        return { ok: true, finalPdfUrl: resp.zotfetchFinalURL || candidate.url,
+          method: "direct", headers: candidate.headers, pdfBlob };
       }
       // Non-PDF response: check for challenge/auth-wall in the body.
       // ScienceDirect and others return HTTP 200 with a bot-detection page.
-      const body = typeof resp.responseText === "string" ? resp.responseText : "";
+      const body = resp.response?.text ? await resp.response.text() :
+        (typeof resp.responseText === "string" ? resp.responseText : "");
       if (body) {
         const challengeReason = ProtectedHosts.detectChallengeInText(body);
         if (challengeReason) {
@@ -537,22 +561,25 @@ var PublisherPatternResolver = class {
     const rule  = PUBLISHER_RULES.find(r => r.hostPattern.test(host));
     const policy = ProtectedHosts.getHostPolicy(host);
 
-    ctx.logger(`[PublisherPatternResolver] host=${host} url=${candidate.url.substring(0, 80)}`);
+    ctx.logger(`[PublisherPatternResolver] host=${host} url=${Utils.urlForLog(candidate.url)}`);
 
     let doc;
+    let docBase = candidate.url;
     try {
       // Use aggressive stealth headers for protected hosts like Elsevier
       const stealthHeaders = policy ? Utils.getAggressiveStealthHeaders({ isNavigation: true }) : Utils.getStealthHeaders({ isNavigation: true });
 
-      const resp = await Zotero.HTTP.request("GET", candidate.url, {
+      const resp = await Utils.safeRequest("GET", candidate.url, {
         responseType: "document",
         timeout: ctx.timeoutMs,
+          zotfetchPolicy: ctx.networkPolicy,
         headers: {
           ...stealthHeaders,
           ...(candidate.headers || {})
         }
       });
       doc = resp.responseXML;
+      docBase = resp.zotfetchFinalURL || candidate.url;
     } catch (error) {
       const reason = _classifyHttpError(error);
       ctx.logger(`[PublisherPatternResolver] Fetch error ${reason} on ${host}`);
@@ -581,14 +608,14 @@ var PublisherPatternResolver = class {
     }
 
     // ── Publisher-specific extraction ───────────────────────────────────
-    let extracted = rule ? rule.extract(doc, candidate.url) : null;
+    let extracted = rule ? rule.extract(doc, docBase) : null;
 
     // ── Generic fallback extraction (same GET — avoids a second request) ─
     // If the publisher-specific rule found nothing, try the generic extraction
     // chain.  HtmlLandingPDFResolver.canResolve() returns false for hosts
     // covered here, so without this fallback those pages would yield no PDF.
     if (!extracted) {
-      extracted = _genericPdfExtract(doc, candidate.url);
+      extracted = _genericPdfExtract(doc, docBase);
     }
 
     if (!extracted) {
@@ -596,13 +623,13 @@ var PublisherPatternResolver = class {
       return { ok: false, failureReason: "nopdf" };
     }
 
-    ctx.logger(`[PublisherPatternResolver] Extracted: ${extracted.substring(0, 80)} (${Date.now() - t0}ms)`);
+    ctx.logger(`[PublisherPatternResolver] Extracted: ${Utils.urlForLog(extracted)} (${Date.now() - t0}ms)`);
 
     // Pass the landing page URL as Referer so the PDF endpoint recognises
     // the same host context — critical for auth-gated Elsevier PDF URLs.
-    const validated = await _validatePdf(extracted, candidate.headers, ctx, candidate.url);
+    const validated = await _validatePdf(extracted, candidate.headers, ctx, docBase);
     if (!validated) {
-      ctx.logger(`[PublisherPatternResolver] Validation failed: ${extracted.substring(0, 80)}`);
+      ctx.logger(`[PublisherPatternResolver] Validation failed: ${Utils.urlForLog(extracted)}`);
       return { ok: false, failureReason: "nopdf" };
     }
 
@@ -631,22 +658,25 @@ var SciHubPDFResolver = class {
     const host = Utils.getDomain(candidate.url);
     const policy = ProtectedHosts.getHostPolicy(host);
 
-    ctx.logger(`[SciHubPDFResolver] ${candidate.url.substring(0, 80)}`);
+    ctx.logger(`[SciHubPDFResolver] ${Utils.urlForLog(candidate.url)}`);
 
     let doc;
+    let docBase = candidate.url;
     try {
       // Use aggressive stealth headers for protected hosts
       const stealthHeaders = policy ? Utils.getAggressiveStealthHeaders({ isNavigation: true }) : Utils.getStealthHeaders({ isNavigation: true });
 
-      const resp = await Zotero.HTTP.request("GET", candidate.url, {
+      const resp = await Utils.safeRequest("GET", candidate.url, {
         responseType: "document",
         timeout: ctx.timeoutMs,
+          zotfetchPolicy: ctx.networkPolicy,
         headers: {
           ...stealthHeaders,
           ...(candidate.headers || {})
         }
       });
       doc = resp.responseXML;
+      docBase = resp.zotfetchFinalURL || candidate.url;
     } catch (error) {
       const reason = _classifyHttpError(error);
       ctx.logger(`[SciHubPDFResolver] Fetch error: ${reason}`);
@@ -663,19 +693,30 @@ var SciHubPDFResolver = class {
     }
 
     // Sci-Hub specific extraction
-    let extracted = this._extractFromSciHub(doc, candidate.url);
+    const extracted = this._extractFromSciHub(doc, docBase);
 
     if (!extracted) {
       ctx.logger(`[SciHubPDFResolver] No PDF found (${Date.now() - t0}ms)`);
       return { ok: false, failureReason: "nopdf" };
     }
 
-    ctx.logger(`[SciHubPDFResolver] Extracted: ${extracted.substring(0, 80)} (${Date.now() - t0}ms)`);
+    ctx.logger(`[SciHubPDFResolver] Extracted: ${Utils.urlForLog(extracted)} (${Date.now() - t0}ms)`);
 
-    const validated = await _validatePdf(extracted, candidate.headers, ctx, candidate.url);
+    const validated = await _validatePdf(extracted, candidate.headers, ctx, docBase);
+    let downloaded = null;
     if (!validated) {
-      ctx.logger(`[SciHubPDFResolver] Validation failed`);
-      return { ok: false, failureReason: "nopdf" };
+      if (!Utils.isSafeDestinationURL(extracted, ctx.networkPolicy)) {
+        return { ok: false, failureReason: "network" };
+      }
+      // Opaque PDF URLs may reject HEAD. Validate by GET and retain the blob
+      // for AttachmentImporter so this fallback does not download twice.
+      downloaded = await new DirectPDFResolver().resolve({
+        ...candidate, url: extracted, kind: "direct-pdf"
+      }, ctx);
+      if (!downloaded.ok) {
+        ctx.logger(`[SciHubPDFResolver] Validation failed`);
+        return downloaded;
+      }
     }
 
     ctx.logger(`[SciHubPDFResolver] OK (${Date.now() - t0}ms)`);
@@ -683,17 +724,20 @@ var SciHubPDFResolver = class {
       ok: true,
       finalPdfUrl: extracted,
       method: "scihub",
-      headers: candidate.headers
+      headers: candidate.headers,
+      pdfBlob: downloaded?.pdfBlob
     };
   }
 
   _extractFromSciHub(doc, base) {
     // Sci-Hub specific selectors
     // Look for iframe with id="pdf"
-    let iframe = doc.querySelector('iframe#pdf');
+    const iframe = doc.querySelector('iframe#pdf');
     if (iframe) {
       const src = iframe.getAttribute("src");
-      if (src && /\.pdf/i.test(src)) return _resolveUrl(src, base);
+      // Sci-Hub often serves a PDF from an opaque URL without a .pdf suffix.
+      // _validatePdf() checks the response before it reaches the importer.
+      if (src) return _resolveUrl(src, base);
     }
 
     // Look for embed with PDF
@@ -749,22 +793,25 @@ var HtmlLandingPDFResolver = class {
     const host = Utils.getDomain(candidate.url);
     const policy = ProtectedHosts.getHostPolicy(host);
 
-    ctx.logger(`[HtmlLandingPDFResolver] ${candidate.url.substring(0, 80)}`);
+    ctx.logger(`[HtmlLandingPDFResolver] ${Utils.urlForLog(candidate.url)}`);
 
     let doc;
+    let docBase = candidate.url;
     try {
       // Use aggressive stealth headers for protected hosts
       const stealthHeaders = policy ? Utils.getAggressiveStealthHeaders({ isNavigation: true }) : Utils.getStealthHeaders({ isNavigation: true });
 
-      const resp = await Zotero.HTTP.request("GET", candidate.url, {
+      const resp = await Utils.safeRequest("GET", candidate.url, {
         responseType: "document",
         timeout: ctx.timeoutMs,
+          zotfetchPolicy: ctx.networkPolicy,
         headers: {
           ...stealthHeaders,
           ...(candidate.headers || {})
         }
       });
       doc = resp.responseXML;
+      docBase = resp.zotfetchFinalURL || candidate.url;
     } catch (error) {
       const reason = _classifyHttpError(error);
       ctx.logger(`[HtmlLandingPDFResolver] Fetch error: ${reason}`);
@@ -785,17 +832,17 @@ var HtmlLandingPDFResolver = class {
     }
 
     const extracted =
-      this._fromMeta(doc, candidate.url) ||
-      this._fromAlternate(doc, candidate.url) ||
-      this._fromEmbed(doc, candidate.url) ||
-      this._fromAnchor(doc, candidate.url);
+      this._fromMeta(doc, docBase) ||
+      this._fromAlternate(doc, docBase) ||
+      this._fromEmbed(doc, docBase) ||
+      this._fromAnchor(doc, docBase);
 
     if (!extracted) {
       ctx.logger(`[HtmlLandingPDFResolver] No PDF link found (${Date.now() - t0}ms)`);
       return { ok: false, failureReason: "nopdf" };
     }
 
-    ctx.logger(`[HtmlLandingPDFResolver] Candidate URL: ${extracted.substring(0, 80)}`);
+    ctx.logger(`[HtmlLandingPDFResolver] Candidate URL: ${Utils.urlForLog(extracted)}`);
 
     const validated = await _validatePdf(extracted, candidate.headers, ctx, null);
     if (!validated) {
@@ -881,7 +928,7 @@ var HtmlLandingPDFResolver = class {
 // check also fails — they are recognised via looksLikeElsevierPdfUrl().
 // ─────────────────────────────────────────────────────────────────────────────
 async function _validatePdf(url, headers, ctx, landingUrl) {
-  if (!url) return false;
+  if (!url || !Utils.isSafeDestinationURL(url, ctx.networkPolicy)) return false;
   const domain = Utils.getDomain(url);
   const policy = ProtectedHosts.getHostPolicy(domain);
 
@@ -904,9 +951,10 @@ async function _validatePdf(url, headers, ctx, landingUrl) {
       ...Utils.getStealthHeaders(),
       ...(headers || {})
     };
-    if (landingUrl) reqHeaders["Referer"] = landingUrl;
-    const head = await Zotero.HTTP.request("HEAD", url, {
+    if (landingUrl) reqHeaders.Referer = landingUrl;
+    const head = await Utils.safeRequest("HEAD", url, {
       timeout: ctx.timeoutMs,
+          zotfetchPolicy: ctx.networkPolicy,
       headers: reqHeaders
     });
     const ct = head.getResponseHeader?.("Content-Type") || "";
@@ -966,13 +1014,24 @@ var HiddenBrowserPDFResolver = class {
     // Gecko context, so we must whitelist the scheme here as a defence-in-depth
     // check (importResolvedPdf already validates the final PDF URL, but this
     // guard must fire before processDocuments is called).
-    if (!/^https?:\/\//i.test(url)) {
-      ctx.logger(`[HiddenBrowserPDFResolver] Blocked non-http(s) URL: ${url.substring(0, 80)}`);
+    if (!Utils.isSafeDestinationURL(url, ctx.networkPolicy) ||
+        !Utils.isTrustedBrowserHost(url)) {
+      ctx.logger(`[HiddenBrowserPDFResolver] Blocked unsafe URL: ${Utils.urlForLog(url)}`);
       return { ok: false, failureReason: "network" };
     }
+    try {
+      const preflight = await Utils.safeRequest("HEAD", url, {
+        timeout: ctx.timeoutMs, successCodes: false,
+        zotfetchPolicy: ctx.networkPolicy
+      });
+      if (!Utils.isTrustedBrowserHost(preflight.zotfetchFinalURL || url)) {
+        return { ok: false, failureReason: "network" };
+      }
+    }
+    catch (_) { return { ok: false, failureReason: "network" }; }
 
     const host = candidate.meta?.publisherHost || Utils.getDomain(url);
-    ctx.logger(`[HiddenBrowserPDFResolver] Loading in hidden browser: ${url.substring(0, 80)} host=${host}`);
+    ctx.logger(`[HiddenBrowserPDFResolver] Loading in hidden browser: ${Utils.urlForLog(url)} host=${host}`);
     const t0 = Date.now();
 
     let extracted  = null;
@@ -1013,14 +1072,14 @@ var HiddenBrowserPDFResolver = class {
           extracted = (rule ? rule.extract(doc, base) : null) || _genericPdfExtract(doc, base);
 
           if (extracted) {
-            ctx.logger(`[HiddenBrowserPDFResolver] Extracted: ${extracted.substring(0, 80)} (${Date.now() - t0}ms)`);
+            ctx.logger(`[HiddenBrowserPDFResolver] Extracted: ${Utils.urlForLog(extracted)} (${Date.now() - t0}ms)`);
           } else {
             ctx.logger(`[HiddenBrowserPDFResolver] No PDF link in rendered DOM of ${host} (${Date.now() - t0}ms)`);
           }
         }
       );
     } catch (err) {
-      ctx.logger(`[HiddenBrowserPDFResolver] Error: ${err?.message || err}`);
+      ctx.logger(`[HiddenBrowserPDFResolver] Error: ${Utils.errorForLog(err)}`);
       return { ok: false, failureReason: "network" };
     }
 
@@ -1035,7 +1094,7 @@ var HiddenBrowserPDFResolver = class {
     // Validate using the same HEAD/trust logic as the other resolvers.
     const validated = await _validatePdf(extracted, candidate.headers, ctx, url);
     if (!validated) {
-      ctx.logger(`[HiddenBrowserPDFResolver] Validation failed: ${extracted.substring(0, 80)}`);
+      ctx.logger(`[HiddenBrowserPDFResolver] Validation failed: ${Utils.urlForLog(extracted)}`);
       return { ok: false, failureReason: "nopdf" };
     }
 

@@ -14,6 +14,7 @@ __pycache__/
 # Publication drafts (local only, not for GitHub)
 wiki/ZoteroBlog.md
 wiki/Code4LibArticle.md
+checks.txt
 
 # OS / editor noise
 .DS_Store
@@ -21,3 +22,4 @@ Thumbs.db
 *.swp
 *.swo
 .vscode/settings.json
+node_modules/

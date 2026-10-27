@@ -1,6 +1,14 @@
 // chrome/content/ui.mjs
 // UI Module: Menus, progress, window management
 
+const ZOTFETCH_MENU_HELP = Object.freeze({
+  batch: "Search selected items without PDFs (up to Batch Size), using the configured sources and fallbacks.",
+  ultra: "Single pass through fast sources; skips the CAPES fallback and may find fewer PDFs.",
+  retry: "Retry items that failed in the most recent batch; current selection is ignored.",
+  auth: "Open up to three DOI pages for manual access, then retry items blocked by access or CAPTCHA.",
+  preferences: "Open the ZotFetch pane in Zotero Settings."
+});
+
 class ZotFetchUI {
   static PLUGIN_ID = "zotfetch@edslab.research";
   static menuID = null;
@@ -8,9 +16,9 @@ class ZotFetchUI {
   static async init() {
     if (Zotero.MenuManager?.registerMenu) {
       try {
-        this.menuID = Zotero.MenuManager.registerMenu({
+        ZotFetchUI.menuID = Zotero.MenuManager.registerMenu({
           menuID: "zotfetch-main-menu",
-          pluginID: this.PLUGIN_ID,
+          pluginID: ZotFetchUI.PLUGIN_ID,
           target: "main/library/item",
           menus: [
             {
@@ -20,6 +28,7 @@ class ZotFetchUI {
                 {
                   menuType: "menuitem",
                   label: "Batch Download",
+                  tooltipText: ZOTFETCH_MENU_HELP.batch,
                   onCommand: () => {
                     if (typeof ZotFetch !== 'undefined') {
                       ZotFetch.runBatch();
@@ -31,7 +40,7 @@ class ZotFetchUI {
                 {
                   menuType: "menuitem",
                   label: "Ultra Fast",
-                  tooltipText: "Ultra Fast: single-pass, OA + one Sci-Hub mirror. May download fewer PDFs.",
+                  tooltipText: ZOTFETCH_MENU_HELP.ultra,
                   onCommand: () => {
                     if (typeof ZotFetch !== 'undefined') {
                       ZotFetch.runUltraFastBatch();
@@ -46,7 +55,7 @@ class ZotFetchUI {
                 {
                   menuType: "menuitem",
                   label: "Retry Failed",
-                  tooltipText: "Re-attempts only the items that failed in the last batch.",
+                  tooltipText: ZOTFETCH_MENU_HELP.retry,
                   onCommand: () => {
                     if (typeof ZotFetch !== 'undefined') {
                       ZotFetch.runRetryFailed();
@@ -56,7 +65,7 @@ class ZotFetchUI {
                 {
                   menuType: "menuitem",
                   label: "Retry After Auth",
-                  tooltipText: "Opens DOIs in browser for authentication, then retries captcha/blocked items.",
+                  tooltipText: ZOTFETCH_MENU_HELP.auth,
                   onCommand: () => {
                     if (typeof ZotFetch !== 'undefined') {
                       ZotFetch.runRetryAfterAuth();
@@ -69,17 +78,14 @@ class ZotFetchUI {
                 {
                   menuType: "menuitem",
                   label: "Preferences",
-                  onCommand: () => {
-                    if (typeof ZotFetchPrefs !== 'undefined') {
-                      ZotFetchPrefs.openPrefsDialog();
-                    }
-                  }
+                  tooltipText: ZOTFETCH_MENU_HELP.preferences,
+                  onCommand: () => ZotFetchPrefs.openPrefsDialog()
                 }
               ]
             }
           ]
         });
-        Zotero.debug(`ZotFetch MenuManager registered: ${this.menuID}`);
+        Zotero.debug(`ZotFetch MenuManager registered: ${ZotFetchUI.menuID}`);
       } catch (error) {
         Zotero.logError(error);
       }
@@ -89,7 +95,7 @@ class ZotFetchUI {
   // Fallback/legacy for DOM injection
   static addToAllWindows() {
     Zotero.getMainWindows().forEach(win => {
-      if (win.ZoteroPane) this.addToWindow(win);
+      if (win.ZoteroPane) ZotFetchUI.addToWindow(win);
     });
   }
 
@@ -114,6 +120,7 @@ class ZotFetchUI {
     const batchItem = doc.createXULElement("menuitem");
     batchItem.id = "zotfetch-menu";
     batchItem.setAttribute("label", "Batch Download");
+    batchItem.setAttribute("tooltiptext", ZOTFETCH_MENU_HELP.batch);
     batchItem.addEventListener("command", () => {
       if (typeof ZotFetch !== 'undefined') {
         ZotFetch.runBatch().catch(e => Zotero.logError(e));
@@ -125,7 +132,7 @@ class ZotFetchUI {
     const ultraItem = doc.createXULElement("menuitem");
     ultraItem.id = "zotfetch-ultra";
     ultraItem.setAttribute("label", "Ultra Fast");
-    ultraItem.setAttribute("tooltiptext", "Single-pass, OA + one Sci-Hub mirror. May download fewer PDFs.");
+    ultraItem.setAttribute("tooltiptext", ZOTFETCH_MENU_HELP.ultra);
     ultraItem.addEventListener("command", () => {
       if (typeof ZotFetch !== 'undefined') {
         ZotFetch.runUltraFastBatch().catch(e => Zotero.logError(e));
@@ -139,7 +146,7 @@ class ZotFetchUI {
     const retryItem = doc.createXULElement("menuitem");
     retryItem.id = "zotfetch-retry";
     retryItem.setAttribute("label", "Retry Failed");
-    retryItem.setAttribute("tooltiptext", "Re-attempts only the items that failed in the last batch.");
+    retryItem.setAttribute("tooltiptext", ZOTFETCH_MENU_HELP.retry);
     retryItem.addEventListener("command", () => {
       if (typeof ZotFetch !== 'undefined') {
         ZotFetch.runRetryFailed().catch(e => Zotero.logError(e));
@@ -151,7 +158,7 @@ class ZotFetchUI {
     const retryAuthItem = doc.createXULElement("menuitem");
     retryAuthItem.id = "zotfetch-retry-auth";
     retryAuthItem.setAttribute("label", "Retry After Auth");
-    retryAuthItem.setAttribute("tooltiptext", "Opens DOIs in browser for authentication, then retries captcha/blocked items.");
+    retryAuthItem.setAttribute("tooltiptext", ZOTFETCH_MENU_HELP.auth);
     retryAuthItem.addEventListener("command", () => {
       if (typeof ZotFetch !== 'undefined') {
         ZotFetch.runRetryAfterAuth().catch(e => Zotero.logError(e));
@@ -165,6 +172,7 @@ class ZotFetchUI {
     const configItem = doc.createXULElement("menuitem");
     configItem.id = "zotfetch-config";
     configItem.setAttribute("label", "Preferences");
+    configItem.setAttribute("tooltiptext", ZOTFETCH_MENU_HELP.preferences);
     configItem.addEventListener("command", () => {
       if (typeof ZotFetchPrefs !== 'undefined') {
         ZotFetchPrefs.openPrefsDialog();
