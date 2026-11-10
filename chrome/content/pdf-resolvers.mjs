@@ -5,7 +5,7 @@
 // PDFResolutionResult shape:
 //   ok            {boolean}
 //   finalPdfUrl?  {string}
-//   method?       {"direct"|"html-meta"|"html-anchor"|"iframe"|"publisher-pattern"|"scihub"}
+//   method?       {"direct"|"html-meta"|"html-anchor"|"iframe"|"publisher-pattern"}
 //   headers?      {Object}
 //   failureReason?  {"nopdf"|"auth"|"captcha"|"blocked"|"timeout"|"network"|"cloudflare"}
 
@@ -643,134 +643,7 @@ var PublisherPatternResolver = class {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SciHubPDFResolver
-// Specialized resolver for Sci-Hub pages. Sci-Hub embeds PDFs in iframes or
-// embeds with specific selectors. This resolver tries to extract the PDF URL
-// directly from Sci-Hub's DOM structure.
-// ─────────────────────────────────────────────────────────────────────────────
-var SciHubPDFResolver = class {
-  canResolve(candidate) {
-    return candidate.sourceId === "scihub" && candidate.kind === "landing-page";
-  }
 
-  async resolve(candidate, ctx) {
-    const t0 = Date.now();
-    const host = Utils.getDomain(candidate.url);
-    const policy = ProtectedHosts.getHostPolicy(host);
-
-    ctx.logger(`[SciHubPDFResolver] ${Utils.urlForLog(candidate.url)}`);
-
-    let doc;
-    let docBase = candidate.url;
-    try {
-      // Use aggressive stealth headers for protected hosts
-      const stealthHeaders = policy ? Utils.getAggressiveStealthHeaders({ isNavigation: true }) : Utils.getStealthHeaders({ isNavigation: true });
-
-      const resp = await Utils.safeRequest("GET", candidate.url, {
-        responseType: "document",
-        timeout: ctx.timeoutMs,
-          zotfetchPolicy: ctx.networkPolicy,
-        headers: {
-          ...stealthHeaders,
-          ...(candidate.headers || {})
-        }
-      });
-      doc = resp.responseXML;
-      docBase = resp.zotfetchFinalURL || candidate.url;
-    } catch (error) {
-      const reason = _classifyHttpError(error);
-      ctx.logger(`[SciHubPDFResolver] Fetch error: ${reason}`);
-      return { ok: false, failureReason: reason };
-    }
-
-    if (!doc) return { ok: false, failureReason: "nopdf" };
-
-    // ── Challenge detection ─────────────────────────────────────────────
-    const challengeReason = ProtectedHosts.detectChallengeInDoc(doc);
-    if (challengeReason) {
-      ctx.logger(`[SciHubPDFResolver] Challenge detected: ${challengeReason}`);
-      return { ok: false, failureReason: challengeReason };
-    }
-
-    // Sci-Hub specific extraction
-    const extracted = this._extractFromSciHub(doc, docBase);
-
-    if (!extracted) {
-      ctx.logger(`[SciHubPDFResolver] No PDF found (${Date.now() - t0}ms)`);
-      return { ok: false, failureReason: "nopdf" };
-    }
-
-    ctx.logger(`[SciHubPDFResolver] Extracted: ${Utils.urlForLog(extracted)} (${Date.now() - t0}ms)`);
-
-    const validated = await _validatePdf(extracted, candidate.headers, ctx, docBase);
-    let downloaded = null;
-    if (!validated) {
-      if (!Utils.isSafeDestinationURL(extracted, ctx.networkPolicy)) {
-        return { ok: false, failureReason: "network" };
-      }
-      // Opaque PDF URLs may reject HEAD. Validate by GET and retain the blob
-      // for AttachmentImporter so this fallback does not download twice.
-      downloaded = await new DirectPDFResolver().resolve({
-        ...candidate, url: extracted, kind: "direct-pdf"
-      }, ctx);
-      if (!downloaded.ok) {
-        ctx.logger(`[SciHubPDFResolver] Validation failed`);
-        return downloaded;
-      }
-    }
-
-    ctx.logger(`[SciHubPDFResolver] OK (${Date.now() - t0}ms)`);
-    return {
-      ok: true,
-      finalPdfUrl: extracted,
-      method: "scihub",
-      headers: candidate.headers,
-      pdfBlob: downloaded?.pdfBlob
-    };
-  }
-
-  _extractFromSciHub(doc, base) {
-    // Sci-Hub specific selectors
-    // Look for iframe with id="pdf"
-    const iframe = doc.querySelector('iframe#pdf');
-    if (iframe) {
-      const src = iframe.getAttribute("src");
-      // Sci-Hub often serves a PDF from an opaque URL without a .pdf suffix.
-      // _validatePdf() checks the response before it reaches the importer.
-      if (src) return _resolveUrl(src, base);
-    }
-
-    // Look for embed with PDF
-    const embed = doc.querySelector('embed[type="application/pdf"], embed[src*=".pdf"]');
-    if (embed) {
-      const src = embed.getAttribute("src");
-      if (src) return _resolveUrl(src, base);
-    }
-
-    // Look for object with PDF
-    const object = doc.querySelector('object[type="application/pdf"], object[data*=".pdf"]');
-    if (object) {
-      const data = object.getAttribute("data");
-      if (data) return _resolveUrl(data, base);
-    }
-
-    // Look for download button or link
-    const downloadBtn = doc.querySelector('a[href*=".pdf"], button[onclick*=".pdf"]');
-    if (downloadBtn) {
-      const href = downloadBtn.getAttribute("href");
-      if (href && /\.pdf/i.test(href)) return _resolveUrl(href, base);
-      // Check onclick for PDF URL
-      const onclick = downloadBtn.getAttribute("onclick");
-      if (onclick) {
-        const match = onclick.match(/['"](https?:[^'"]*\.pdf[^'"]*)['"]/i);
-        if (match) return _resolveUrl(match[1], base);
-      }
-    }
-
-    // Fallback to generic extraction
-    return _genericPdfExtract(doc, base);
-  }
-};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HtmlLandingPDFResolver
@@ -1109,6 +982,5 @@ var HiddenBrowserPDFResolver = class {
 
 this.DirectPDFResolver = DirectPDFResolver;
 this.PublisherPatternResolver = PublisherPatternResolver;
-this.SciHubPDFResolver = SciHubPDFResolver;
 this.HtmlLandingPDFResolver = HtmlLandingPDFResolver;
 this.HiddenBrowserPDFResolver = HiddenBrowserPDFResolver;

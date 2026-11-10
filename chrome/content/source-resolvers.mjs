@@ -732,51 +732,7 @@ var OaMgSourceResolver = class {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SciHubSourceResolver
-// Uses Sci-Hub mirrors to obtain PDFs. Sci-Hub provides access to paywalled
-// papers by scraping publisher sites. Multiple mirrors are tried.
-// Priority is set lower than OA sources but higher than paywalled ones.
-// ─────────────────────────────────────────────────────────────────────────────
-var SciHubSourceResolver = class {
-  constructor() { this.id = "scihub"; }
 
-  enabled() { return true; }
-
-  async buildCandidates(_item, ids) {
-    if (!ids.doi) return [];
-
-    // ZotFetch's own mirrors; Sci-PDF's configured mirrors are used only by
-    // the optional native fallback in fetch.mjs.
-    const mirrors = [
-      "https://sci-hub.se",
-      "https://sci-hub.st",
-      "https://sci-hub.ru",
-      "https://sci-hub.ren",
-      "https://sci-hub.wf",
-      "https://sci-hub.ee",
-      "https://sci-hub.box",
-      "https://sci-hub.red",
-      "https://sci-net.xyz/"
-    ];
-
-    const candidates = [];
-    let priority = 80;
-
-    for (const mirror of mirrors) {
-      const url = `${mirror.replace(/\/+$/, "")}/${ids.doi}`;
-      candidates.push({
-        sourceId: "scihub",
-        label: "Sci-Hub",
-        url,
-        kind: "landing-page",
-        priority: priority--,
-        headers: Utils.getStealthHeaders()
-      });
-    }
-
-    return candidates;
-  }
-};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DoajSourceResolver
@@ -1090,4 +1046,3 @@ this.NativeDoiSourceResolver = NativeDoiSourceResolver;
 this.DoiLandingSourceResolver = DoiLandingSourceResolver;
 this.InstitutionalProxySourceResolver = InstitutionalProxySourceResolver;
 this.CapesSourceResolver = CapesSourceResolver;
-this.SciHubSourceResolver=SciHubSourceResolver

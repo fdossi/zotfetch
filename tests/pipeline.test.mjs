@@ -508,54 +508,6 @@ await test("new resolver priority chain: IA(84) > Paperity(81) > OaMg(73) > CAPE
 
 console.log("\nPDFResolvers");
 
-await test("SciHubPDFResolver: accepts opaque iframe#pdf URLs", async () => {
-  const doc = domFrom('<iframe id="pdf" src="https://files.example.org/download?id=42"></iframe>');
-  const url = new SciHubPDFResolver()._extractFromSciHub(doc, "https://sci-hub.example/10.1/test");
-  assert(url === "https://files.example.org/download?id=42");
-});
-
-await test("SciHubSourceResolver: builds DOI URLs without duplicate slashes", async () => {
-  const candidates = await new SciHubSourceResolver().buildCandidates({}, { doi: "10.1234/test" });
-  assert(candidates.length > 0);
-  assert(candidates.every(candidate => !new URL(candidate.url).pathname.startsWith("//")));
-});
-
-await test("SciHubPDFResolver: mocked page and HEAD yield a PDF URL", async () => {
-  const page = "https://sci-hub.example/10.1234/test";
-  const pdf = "https://files.example.org/article.pdf";
-  mockHttp({
-    [page]: async () => ({ responseXML: domFrom(`<iframe id="pdf" src="${pdf}"></iframe>`) }),
-    [pdf]: async () => ({ getResponseHeader: () => "application/pdf" })
-  });
-  const result = await new SciHubPDFResolver().resolve(
-    { sourceId: "scihub", kind: "landing-page", url: page, headers: {} },
-    { timeoutMs: 5000, logger: () => {}, allowPrivate: false }
-  );
-  assert(result.ok && result.finalPdfUrl === pdf);
-});
-
-await test("SciHubPDFResolver: opaque URL with failed HEAD uses one validated GET", async () => {
-  const page = "https://sci-hub.example/10.1234/test";
-  const pdf = "https://files.example.org/download?id=42";
-  const blob = new Blob(["%PDF-1.7\nfixture"], { type: "application/pdf" });
-  const calls = [];
-  mockHttp({
-    [page]: async () => ({ responseXML: domFrom(`<iframe id="pdf" src="${pdf}"></iframe>`) }),
-    "https://files.example.org/download": async (method) => {
-      calls.push(method);
-      if (method === "HEAD") throw new Error("HEAD unavailable");
-      return { response: blob, getResponseHeader: () => "application/pdf" };
-    }
-  });
-  const result = await new SciHubPDFResolver().resolve(
-    { sourceId: "scihub", kind: "landing-page", url: page,
-      headers: { Referer: page } },
-    { timeoutMs: 5000, logger: () => {}, allowPrivate: false }
-  );
-  assert(result.ok && result.finalPdfUrl === pdf && result.pdfBlob === blob);
-  assert(calls.join(",") === "HEAD,GET");
-});
-
 const mockCtx = {
   timeoutMs: 3000,
   cooldown: new CooldownManager(),

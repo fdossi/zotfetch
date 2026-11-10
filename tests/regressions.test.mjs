@@ -347,7 +347,6 @@ await test("candidate deduplication respects request headers and access route", 
   assert.equal(key(base), key({ ...base, sourceId: "openalex", headers: { referer: "https://example.org/" } }));
   assert.notEqual(key(base), key({ ...base, headers: { Referer: "https://different.org/" } }));
   assert.notEqual(key(base), key({ ...base, sourceId: "capes" }));
-  assert.equal(key({ ...base, sourceId: "scihub" }), null);
 });
 
 await test("validated PDF blob is imported once through Zotero storage", async () => {
@@ -445,92 +444,6 @@ await test("HEAD-only PDF result uses one guarded GET and no native URL import",
     { id: 1, libraryID: 1 }, { ok: true, finalPdfUrl: "https://example.org/a.pdf" }, "Test"), true);
   assert.equal(guardedGets, 1);
   assert.equal(nativeImports, 0);
-});
-
-await test("Sci-PDF fallback invokes Zotero custom method only for active Sci-PDF resolvers", async () => {
-  let active = true;
-  let attached = false;
-  let calls = 0;
-  let configured = [{ name: "Sci-Hub", method: "GET", mode: "html", selector: "#pdf",
-    attribute: "src", url: "https://sci-hub.example/{doi}" }];
-  const context = vm.createContext({
-    CooldownManager: class {},
-    ProtectedHosts: { ProtectedHostNegativeCache: class {}, ItemHostAttemptTracker: class {} },
-    ChromeUtils: { importESModule: () => ({ AddonManager: {
-      getAddonByID: async id => id === "scipdf@ytshen.com" ? { isActive: active } : null
-    } }) },
-    Utils: { isSafeNetworkURL: url => url.startsWith("https://") },
-    Zotero: { debug() {}, Prefs: { get: () => JSON.stringify(configured) },
-      Attachments: { canFindFileForItem: () => true,
-        addAvailableFile: async (_item, options) => {
-          assert.deepEqual(Array.from(options.methods), ["custom"]);
-          calls++;
-          attached = true;
-        } } }
-  });
-  vm.runInContext(source("chrome/content/fetch.mjs"), context);
-  context.ZotFetch.hasPDF = async () => attached;
-  const item = { id: 1 };
-  assert.equal(await context.ZotFetch._trySciPdfCustom(item, { doi: "10.1/test" }), true);
-  assert.equal(calls, 1);
-  active = false;
-  attached = false;
-  assert.equal(await context.ZotFetch._trySciPdfCustom(item, { doi: "10.1/test" }), false);
-  assert.equal(calls, 1);
-  active = true;
-  configured.push({ name: "Other service", method: "GET", mode: "html",
-    selector: "a", attribute: "href", url: "https://other.example/{doi}" });
-  assert.equal(await context.ZotFetch._trySciPdfCustom(item, { doi: "10.1/test" }), false);
-  assert.equal(calls, 1);
-  configured = [{ name: "Sci-Hub", method: 7, mode: "html", selector: "#pdf",
-    attribute: "src", url: "https://sci-hub.example/{doi}" }];
-  assert.equal(await context.ZotFetch._trySciPdfCustom(item, { doi: "10.1/test" }), false);
-  assert.equal(calls, 1);
-});
-
-await test("Sci-PDF native success is counted without running a second fallback", async () => {
-  const context = vm.createContext({
-    CooldownManager: class {},
-    ProtectedHosts: { ProtectedHostNegativeCache: class {}, ItemHostAttemptTracker: class {} },
-    IdentifierExtractor: { fromItem: async () => ({ doi: "10.1/test" }) },
-    Zotero: { debug() {} }
-  });
-  vm.runInContext(source("chrome/content/fetch.mjs"), context);
-  context.ZotFetch.hasPDF = async () => false;
-  context.ZotFetch._buildSourceResolvers = () => [];
-  context.ZotFetch._buildPdfResolvers = () => [];
-  context.ZotFetch._trySciPdfCustom = async () => true;
-  const stats = { downloaded: 0, scihub: 0, doiRecovered: 0, notFound: 0 };
-  const result = await context.ZotFetch.processItem({ id: 1 }, stats, "fast");
-  assert.equal(result, "scipdf-native");
-  assert.equal(stats.downloaded, 1);
-  assert.equal(stats.scihub, 1);
-  assert.equal(stats.notFound, 0);
-});
-
-await test("Sci-PDF fallback does not repeat a challenged Sci-Hub host", async () => {
-  let nativeCalls = 0;
-  const context = vm.createContext({
-    CooldownManager: class {},
-    ProtectedHosts: { ProtectedHostNegativeCache: class { has() { return false; } },
-      ItemHostAttemptTracker: class {}, getHostPolicy: () => null },
-    IdentifierExtractor: { fromItem: async () => ({ doi: "10.1/test" }) },
-    Utils: { getDomain: () => "sci-hub.example" },
-    Zotero: { debug() {} }
-  });
-  vm.runInContext(source("chrome/content/fetch.mjs"), context);
-  context.ZotFetch.hasPDF = async () => false;
-  context.ZotFetch._buildSourceResolvers = () => [];
-  context.ZotFetch._buildPdfResolvers = () => [];
-  context.ZotFetch._candidateStream = async function* () {
-    yield { sourceId: "scihub", kind: "landing-page", url: "https://sci-hub.example/10.1/test" };
-  };
-  context.ZotFetch._resolveCandidate = async () => ({ ok: false, failureReason: "captcha" });
-  context.ZotFetch._trySciPdfCustom = async () => { nativeCalls++; return true; };
-  const stats = { downloaded: 0, scihub: 0, doiRecovered: 0, notFound: 0 };
-  const result = await context.ZotFetch.processItem({ id: 1 }, stats, "fast");
-  assert.equal(result, "deferred");
-  assert.equal(nativeCalls, 0);
 });
 
 process.stdout.write(`${passed} regression tests passed\n`);

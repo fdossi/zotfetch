@@ -156,7 +156,6 @@ class ZotFetch {
       internetarchive: 0,
       paperity: 0,
       doaj: 0,
-      scihub: 0,
       oamg: 0,
       oarepository: 0,
       institutional: 0,
@@ -330,7 +329,6 @@ class ZotFetch {
     const sourceResolvers = ZotFetch._buildSourceResolvers(mode);
     const pdfResolvers    = ZotFetch._buildPdfResolvers();
     const attemptedCandidates = new Set();
-    let sciHubChallenge = false;
 
     // Per-item set of publisher hosts where a challenge was detected.
     // When earlyAbortOnChallenge is set for the host, all remaining
@@ -464,10 +462,6 @@ class ZotFetch {
       const result = await ZotFetch._resolveCandidate(candidate, pdfResolvers);
       if (!result.ok) {
         const reason = result.failureReason || "nopdf";
-        if (candidate.sourceId === "scihub" &&
-            ["captcha", "cloudflare", "blocked", "auth"].includes(reason)) {
-          sciHubChallenge = true;
-        }
         // Only a definitive no-PDF result is deduplicated. A later source may
         // retry an identical URL after a transient network or auth failure.
         if (duplicateKey && reason === "nopdf") attemptedCandidates.add(duplicateKey);
@@ -527,24 +521,12 @@ class ZotFetch {
         else if (sid === "internet-archive")           stats.internetarchive++;
         else if (sid === "paperity")                   stats.paperity++;
         else if (sid === "doaj")                      stats.doaj++;
-        else if (sid === "scihub")                     stats.scihub++;
         else if (sid === "oamg")                       stats.oamg++;
         else if (sid.startsWith("institutional-proxy")) stats.institutional++;
         else if (sid === "capes")                      stats.capes++;
         else                                           stats.oarepository++; // oa-repository / doi-landing / arXiv
         return sid;
       }
-    }
-
-    // Sci-PDF registers Sci-Hub as Zotero custom file resolvers. If the
-    // plugin is active and its configured resolvers are exclusively Sci-Hub,
-    // let Zotero make one final native attempt before reporting failure.
-    if (mode !== "fallback" && !sciHubChallenge &&
-        await ZotFetch._trySciPdfCustom(item, ids)) {
-      stats.downloaded++;
-      stats.scihub++;
-      Zotero.debug(`[ZotFetch] Sci-PDF custom resolver succeeded (item ${item.id})`);
-      return "scipdf-native";
     }
 
     // 5. Nothing worked.
@@ -575,7 +557,6 @@ class ZotFetch {
       new InternetArchiveSourceResolver(),   // Fatcat API — archived repo copies (priority 84)
       new PaperitySourceResolver(),          // Paperity OA journal aggregator  (priority 81)
       new DoajSourceResolver(),              // DOAJ OA journal directory       (priority 82)
-      new SciHubSourceResolver(),            // Sci-Hub mirrors                  (priority 80)
       new OaRepositorySourceResolver(),
       new NativeDoiSourceResolver(),         // Zotero Connector-like: translator + proxy
       new DoiLandingSourceResolver(),        // fallback HTML extraction
@@ -589,39 +570,6 @@ class ZotFetch {
     return [...fast, new CapesSourceResolver()];
   }
 
-  static async _trySciPdfCustom(item, ids) {
-    if (!ids.doi || !Zotero.Attachments?.addAvailableFile ||
-        !Zotero.Attachments?.canFindFileForItem?.(item)) return false;
-
-    // The native `custom` method runs every configured custom resolver. Only
-    // delegate when all entries match Sci-PDF's Sci-Hub resolver shape.
-    let resolvers;
-    try {
-      const raw = Zotero.Prefs.get("findPDFs.resolvers");
-      resolvers = JSON.parse(raw);
-    } catch (_) {
-      return false;
-    }
-    if (!Array.isArray(resolvers) || !resolvers.length || !resolvers.every(r =>
-      r?.name === "Sci-Hub" && typeof r.method === "string" &&
-      r.method.toUpperCase() === "GET" && typeof r.mode === "string" &&
-      r.mode.toLowerCase() === "html" && r.selector === "#pdf" &&
-      r.attribute === "src" && typeof r.url === "string" &&
-      r.url.includes("{doi}") && Utils.isSafeNetworkURL(r.url.replace("{doi}", "10.0/test")))) {
-      return false;
-    }
-
-    try {
-      const { AddonManager } = ChromeUtils.importESModule("resource://gre/modules/AddonManager.sys.mjs");
-      const addon = await AddonManager.getAddonByID("scipdf@ytshen.com");
-      if (!addon?.isActive) return false;
-      await Zotero.Attachments.addAvailableFile(item, { methods: ["custom"] });
-      return ZotFetch.hasPDF(item);
-    } catch (error) {
-      Zotero.debug(`[ZotFetch] Sci-PDF custom resolver unavailable: ${Utils.errorForLog(error)}`);
-      return ZotFetch.hasPDF(item);
-    }
-  }
 
   /**
    * Build just enough sources to try the next priority band. The ceilings are
@@ -633,7 +581,7 @@ class ZotFetch {
     const ceilings = {
       native: 110, unpaywall: 100, semanticscholar: 95, openalex: 90,
       europepmc: 89, core: 88, "internet-archive": 84, paperity: 81,
-      doaj: 82, scihub: 80, "oa-repository": 86, "native-doi": 83,
+      doaj: 82, "oa-repository": 86, "native-doi": 83,
       "doi-landing": 80, oamg: 75, "institutional-proxy": 75, capes: 70
     };
     const built = new Set();
@@ -664,8 +612,7 @@ class ZotFetch {
 
   /** Only identical network attempts can share a no-PDF result. */
   static _candidateKey(candidate) {
-    if (!candidate.url || candidate.sourceId === "scihub" ||
-        candidate.kind === "api-result") return null;
+    if (!candidate.url || candidate.kind === "api-result") return null;
     const headers = Object.entries(candidate.headers || {})
       .map(([name, value]) => [name.toLowerCase(), String(value)])
       .sort(([a], [b]) => a.localeCompare(b));
@@ -680,7 +627,6 @@ class ZotFetch {
     return [
       new DirectPDFResolver(),
       new PublisherPatternResolver(),
-      new SciHubPDFResolver(),
       new HtmlLandingPDFResolver(),
       // HiddenBrowserPDFResolver is tried last: it spins up a real Gecko
       // browser instance (Zotero.HTTP.processDocuments) so JS challenges

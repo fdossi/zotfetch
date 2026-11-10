@@ -2,7 +2,7 @@
 
 [![DOI](https://zenodo.org/badge/1186582529.svg)](https://doi.org/10.5281/zenodo.19149482)
 
-**Author:** Fabio Dossi &nbsp;|&nbsp; **Version:** 1.6.6 &nbsp;|&nbsp; [📖 User Manual (Wiki)](https://github.com/fdossi/zotfetch/wiki)
+**Author:** Fabio Dossi &nbsp;|&nbsp; **Version:** 1.6.7 &nbsp;|&nbsp; [📖 User Manual (Wiki)](https://github.com/fdossi/zotfetch/wiki)
 
 **ZotFetch** is a [Zotero](https://www.zotero.org/) plugin that automatically downloads PDFs for multiple library items in a single operation. It uses a modular two-stage pipeline — **source resolution** then **PDF extraction** — so that landing pages from publishers, proxies, and repositories are correctly resolved to their actual PDF URL before import.
 
@@ -14,7 +14,7 @@
 - **Multi-source download**: Native OA → Unpaywall → Semantic Scholar → OpenAlex → Europe PMC → CORE → OA Repository (+ arXiv direct-pdf) → Zotero Native DOI → DOI Landing → Institutional Proxy → CAPES
 - **PMCID support**: extracts `PMCID: PMCxxxxxxx` from item metadata for an instant Europe PMC fast path — no API call needed
 - **HTML-to-PDF extraction**: publisher-specific rules (Springer, Nature, Wiley, Taylor & Francis, ACS, Royal Society of Chemistry, SAGE, Oxford University Press, IEEE, MDPI, Frontiers, Elsevier/ScienceDirect, SciELO.br), a generic HTML extractor, and a Gecko hidden browser for JavaScript-rendered pages
-- **Fast Mode**: Two-pass strategy — fast sources, including Sci-Hub and institutional proxy, first; CAPES for unresolved items
+- **Fast Mode**: Two-pass strategy — fast sources, including institutional proxy, first; CAPES for unresolved items
 - **Ultra Fast Mode**: Single pass through fast sources, without the CAPES fallback
 - **Adaptive rate limiting**: Per-domain request spacing with exponential backoff on failures
 - **Anti-captcha protection**: Tracks consecutive captcha hits per domain; blocks domain after 3 hits, resets on success
@@ -85,10 +85,6 @@ ZotFetch tries sources in this order of priority:
 In **Fast Mode**, all fast sources run in Pass 1; unresolved items proceed to Pass 2 (CAPES). In **Ultra Fast Mode**, fast sources run in a single pass without CAPES. With Fast Mode disabled, Batch Download tries CAPES in the same pass as the other sources.
 
 > **Note:** Additional fallback sources can be enabled in `about:config`. See the Configuration section for available options.
-
-### Sci-Hub and Sci-PDF
-
-ZotFetch tries its own Sci-Hub mirrors for items with a DOI. If those and the other configured sources fail, it can make one final native Zotero attempt using Sci-PDF's custom resolvers. This optional fallback runs only when Sci-PDF (`scipdf@ytshen.com`) is active and every configured Zotero custom resolver matches Sci-PDF's Sci-Hub format. It is skipped after a Sci-Hub authentication, rate-limit, or CAPTCHA challenge, and in the CAPES-only fallback pass. ZotFetch never changes Zotero's custom resolver preference.
 
 ### HTML-to-PDF extraction (landing pages)
 
@@ -225,6 +221,9 @@ THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPL
 ---
 
 ## Changelog
+
+### v1.6.7 ? Sci-Hub mirror removal
+- **Removed**: Sci-Hub mirrors, specialized page extraction, and the Sci-PDF custom-resolver fallback. Other download sources and retry flows are unchanged.
 
 ### v1.6.6 — Network and logging safeguards
 - Validate each HTTP and HTML redirect before following it; reject private DNS answers before ZotFetch-managed requests.
